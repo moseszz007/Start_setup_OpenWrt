@@ -292,42 +292,19 @@ install_theme() {
     echo -e "${GREEN}>>> Устанавливаю тему luci-theme-footstrap...${NC}"
     if ! command -v wget >/dev/null 2>&1; then
         $INSTALL_CMD wget || return 1
-    }
+    fi
     
-    # Установка самой темы
+    # Установка самой темы через установщик автора
     wget -qO- https://raw.githubusercontent.com/VizzleTF/luci-theme-footstrap/main/install.sh | sh || {
         echo -e "${RED}Ошибка установки темы${NC}"
         return 1
     }
 
-    # Установка русской локализации (автоматический поиск ссылки по расширению и названию пакета в релизах GitHub)
-    echo -e "${GREEN}>>> Ищу и устанавливаю русскую локализацию для темы...${NC}"
-    
-    if [ "$PKG_MGR" = "apk" ]; then
-        EXT_PATTERN=".apk"
-    else
-        EXT_PATTERN=".ipk"
-    fi
-
-    THEME_RU_URL=$(wget -qO- "https://api.github.com/repos/VizzleTF/luci-theme-footstrap/releases/latest" | grep "browser_download_url" | grep "luci-i18n-footstrap-ru" | grep "$EXT_PATTERN" | cut -d '"' -f 4)
-
-    if [ -n "$THEME_RU_URL" ]; then
-        THEME_RU_FILE="/tmp/$(basename "$THEME_RU_URL")"
-        echo -e "${GREEN}>>> Скачиваю: $(basename "$THEME_RU_URL")...${NC}"
-        
-        if wget -O "$THEME_RU_FILE" "$THEME_RU_URL"; then
-            if [ "$PKG_MGR" = "apk" ]; then
-                apk add $ALLOW_UNTRUSTED "$THEME_RU_FILE" || echo -e "${RED}Ошибка установки apk-пакета локализации темы${NC}"
-            else
-                opkg install $ALLOW_UNTRUSTED "$THEME_RU_FILE" || echo -e "${RED}Ошибка установки ipk-пакета локализации темы${NC}"
-            fi
-            rm -f "$THEME_RU_FILE"
-        else
-            echo -e "${RED}Ошибка скачивания пакета локализации темы${NC}"
-        fi
-    else
-        echo -e "${YELLOW}Не удалось найти подходящий пакет локализации для темы в релизах GitHub${NC}"
-    fi
+    # Установка русской локализации через штатный менеджер пакетов системы
+    echo -e "${GREEN}>>> Устанавливаю русскую локализацию для темы через $PKG_MGR...${NC}"
+    $INSTALL_CMD $ALLOW_UNTRUSTED luci-i18n-footstrap-ru || {
+        echo -e "${YELLOW}Не удалось установить локализацию темы через менеджер пакетов (возможно, её нет в репозитории вашей версии прошивки)${NC}"
+    }
 
     echo -e "${GREEN}>>> Тема и локализация обработаны${NC}"
 }
