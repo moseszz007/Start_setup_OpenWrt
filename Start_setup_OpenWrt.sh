@@ -293,11 +293,32 @@ install_theme() {
     if ! command -v wget >/dev/null 2>&1; then
         $INSTALL_CMD wget || return 1
     fi
+    
+    # Установка самой темы
     wget -qO- https://raw.githubusercontent.com/VizzleTF/luci-theme-footstrap/main/install.sh | sh || {
         echo -e "${RED}Ошибка установки темы${NC}"
         return 1
     }
-    echo -e "${GREEN}>>> Тема установлена${NC}"
+
+    # Установка русской локализации для темы
+    echo -e "${GREEN}>>> Устанавливаю русскую локализацию для темы...${NC}"
+    if [ "$PKG_MGR" = "apk" ]; then
+        THEME_RU_URL="https://github.com/VizzleTF/luci-theme-footstrap/releases/latest/download/luci-i18n-theme-footstrap-ru.apk"
+        THEME_RU_FILE="/tmp/luci-i18n-theme-footstrap-ru.apk"
+        wget -O "$THEME_RU_FILE" "$THEME_RU_URL" && {
+            apk add $ALLOW_UNTRUSTED "$THEME_RU_FILE" || echo -e "${RED}Ошибка установки apk-пакета локализации темы${NC}"
+            rm -f "$THEME_RU_FILE"
+        } || echo -e "${YELLOW}Не удалось скачать локализацию темы${NC}"
+    else
+        THEME_RU_URL="https://github.com/VizzleTF/luci-theme-footstrap/releases/latest/download/luci-i18n-theme-footstrap-ru.ipk"
+        THEME_RU_FILE="/tmp/luci-i18n-theme-footstrap-ru.ipk"
+        wget -O "$THEME_RU_FILE" "$THEME_RU_URL" && {
+            opkg install $ALLOW_UNTRUSTED "$THEME_RU_FILE" || echo -e "${RED}Ошибка установки ipk-пакета локализации темы${NC}"
+            rm -f "$THEME_RU_FILE"
+        } || echo -e "${YELLOW}Не удалось скачать локализацию темы${NC}"
+    fi
+
+    echo -e "${GREEN}>>> Тема и локализация успешно установлены${NC}"
 }
 
 fix_apk_luci() {
