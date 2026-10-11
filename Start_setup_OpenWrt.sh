@@ -55,7 +55,7 @@ if [ "$RELEASE" = "25.12" ]; then
     DNSPROXY_URL="https://fantastic-packages.github.io/releases/25.12/packages/aarch64_cortex-a53/luci/luci-app-dnsproxy-26.250.33416~c43835f.apk"
     DNSPROXY_FILE="/tmp/luci-app-dnsproxy.apk"
 else
-    DNSPROXY_URL="https://fantastic-packages.github.io/releases/24.10/packages/aarch64_cortex-a53/luci/luci-app-dnsproxy_26.250.33416~c43835f_all.ipk"
+    DNSPROXY_URL="https://fantastic-packages.github.io/releases/archive/24.10/packages/aarch64_generic/luci/luci-app-dnsproxy_26.250.33416~c43835f_all.ipk"
     DNSPROXY_FILE="/tmp/luci-app-dnsproxy.ipk"
 fi
 
@@ -201,7 +201,6 @@ config profile
 	list upstream 'https://9.9.9.9/dns-query'
 	list upstream 'https://8.8.8.8/dns-query'
 	list upstream 'https://doh.opendns.com/dns-query'
-	list upstream 'quic://dns.quad9.net:853'
 	list fallback '77.88.8.8'
 	list fallback '77.88.8.1'
 EOF
