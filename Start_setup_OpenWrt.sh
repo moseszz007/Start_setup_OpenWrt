@@ -52,10 +52,10 @@ luci-i18n-filemanager-ru|Русский язык для файлового ме�
 # ---------- dnsproxy ----------
 DNSPROXY_PKG_NAME="luci-app-dnsproxy"
 if [ "$RELEASE" = "25.12" ]; then
-    DNSPROXY_URL="https://fantastic-packages.github.io/releases/25.12/packages/aarch64_cortex-a53/luci/luci-app-dnsproxy-26.250.33416~c43835f.apk"
+    DNSPROXY_URL="https://raw.githubusercontent.com/fantastic-packages/releases/25.12/packages/aarch64_cortex-a53/luci/luci-app-dnsproxy-26.250.33416~c43835f.apk"
     DNSPROXY_FILE="/tmp/luci-app-dnsproxy.apk"
 else
-    DNSPROXY_URL="https://fantastic-packages.github.io/releases/archive/24.10/packages/aarch64_generic/luci/luci-app-dnsproxy_26.250.33416~c43835f_all.ipk"
+    DNSPROXY_URL="https://raw.githubusercontent.com/fantastic-packages/releases/archive/24.10/packages/aarch64_generic/luci/luci-app-dnsproxy_26.250.33416~c43835f_all.ipk"
     DNSPROXY_FILE="/tmp/luci-app-dnsproxy.ipk"
 fi
 
@@ -398,7 +398,7 @@ else
             install_splify
             continue
         fi
-        if [ "$num" -eq "$INETDET_NUM" ]; then
+        if [ "$num" -eq "$INETDET_NUM" ];        then
             install_internet_detector
             continue
         fi
