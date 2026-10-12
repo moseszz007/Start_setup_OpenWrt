@@ -277,48 +277,61 @@ install_internet_detector() {
         EXT="ipk"
     fi
 
-    echo -e "${BLUE}>>> Проверяю свежие версии в репозитории ($BRANCH)...${NC}"
-    API_URL="https://api.github.com/repos/gSpotx2f/packages-openwrt/contents/$BRANCH"
+    echo -e "${BLUE}>>> Сканирую репозиторий GitHub ($BRANCH)...${NC}"
+    WEB_URL="https://github.com/gSpotx2f/packages-openwrt/tree/master/$BRANCH"
     
-    API_RESPONSE=$(wget -qO- "$API_URL")
+    # Скачиваем HTML страницу репозитория с User-Agent
+    HTML_CONTENT=$(wget -qO- --header="User-Agent: Mozilla/5.0" "$WEB_URL")
 
     if [ "$EXT" = "apk" ]; then
-        FILE_CORE=$(echo "$API_RESPONSE" | grep -oE "internet-detector-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
-        FILE_LUCI=$(echo "$API_RESPONSE" | grep -oE "luci-app-internet-detector-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
-        FILE_RU=$(echo "$API_RESPONSE" | grep -oE "luci-i18n-internet-detector-ru-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
+        FILE_CORE=$(echo "$HTML_CONTENT" | grep -oE "internet-detector-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
+        FILE_LUCI=$(echo "$HTML_CONTENT" | grep -oE "luci-app-internet-detector-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
+        FILE_RU=$(echo "$HTML_CONTENT" | grep -oE "luci-i18n-internet-detector-ru-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
     else
-        FILE_CORE=$(echo "$API_RESPONSE" | grep -oE "internet-detector_[0-9\.-]+_[a-z0-9_]+\.ipk" | head -n 1)
-        FILE_LUCI=$(echo "$API_RESPONSE" | grep -oE "luci-app-internet-detector_[0-9\.-]+_[a-z0-9_]+\.ipk" | head -n 1)
-        FILE_RU=$(echo "$API_RESPONSE" | grep -oE "luci-i18n-internet-detector-ru_[0-9\.-]+_[a-z0-9_]+\.ipk" | head -n 1)
+        FILE_CORE=$(echo "$HTML_CONTENT" | grep -oE "internet-detector_[0-9\.-]_[a-z0-9_]+\.ipk" | head -n 1)
+        # Улучшенный шаблон поиска для .ipk файлов
+        [ -z "$FILE_CORE" ] && FILE_CORE=$(echo "$HTML_CONTENT" | grep -oE "internet-detector_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
+        
+        FILE_LUCI=$(echo "$HTML_CONTENT" | grep -oE "luci-app-internet-detector_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
+        FILE_RU=$(echo "$HTML_CONTENT" | grep -oE "luci-i18n-internet-detector-ru_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
     fi
 
-    if [ -z "$FILE_CORE" ] || [ -z "$FILE_LUCI" ] || [ -z "$FILE_RU" ]; then
-        echo -e "${RED}Не удалось автоматически определить версии через API GitHub!${NC}"
-        return 1
+    # Если автоматический парсинг не сработал, подстрахуемся дефолтными именами r2
+    if [ -z "$FILE_CORE" ]; then
+        echo -e "${YELLOW}Не удалось автоматически найти имена через веб-страницу, используем r2 по умолчанию...${NC}"
+        if [ "$EXT" = "apk" ]; then
+            FILE_CORE="internet-detector-1.7.4-r2.apk"
+            FILE_LUCI="luci-app-internet-detector-1.7.4-r2.apk"
+            FILE_RU="luci-i18n-internet-detector-ru-1.7.4-r2.apk"
+        else
+            FILE_CORE="internet-detector_1.7.4-r2_all.ipk"
+            FILE_LUCI="luci-app-internet-detector_1.7.4-r2_all.ipk"
+            FILE_RU="luci-i18n-internet-detector-ru_1.7.4-r2_all.ipk"
+        fi
     fi
 
     RAW_BASE="https://github.com/gSpotx2f/packages-openwrt/raw/master/$BRANCH"
 
     # Установка Core
     echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_CORE${NC}"
-    wget --no-check-certificate -O "/tmp/$FILE_CORE" "$RAW_BASE/$FILE_CORE"
+    wget --no-check-certificate -O "/tmp/$FILE_CORE" "$RAW_BASE/$FILE_CORE" || { echo -e "${RED}Ошибка скачивания Core${NC}"; return 1; }
     $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_CORE"
     rm -f "/tmp/$FILE_CORE"
 
-    service internet-detector start
-    service internet-detector enable
+    service internet-detector start 2>/dev/null
+    service internet-detector enable 2>/dev/null
 
     # Установка LuCI App
     echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_LUCI${NC}"
-    wget --no-check-certificate -O "/tmp/$FILE_LUCI" "$RAW_BASE/$FILE_LUCI"
+    wget --no-check-certificate -O "/tmp/$FILE_LUCI" "$RAW_BASE/$FILE_LUCI" || { echo -e "${RED}Ошибка скачивания LuCI App${NC}"; return 1; }
     $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_LUCI"
     rm -f "/tmp/$FILE_LUCI"
 
-    service rpcd restart
+    service rpcd restart 2>/dev/null
 
     # Установка Localization (RU)
     echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_RU${NC}"
-    wget --no-check-certificate -O "/tmp/$FILE_RU" "$RAW_BASE/$FILE_RU"
+    wget --no-check-certificate -O "/tmp/$FILE_RU" "$RAW_BASE/$FILE_RU" || { echo -e "${RED}Ошибка скачивания локализации${NC}"; return 1; }
     $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_RU"
     rm -f "/tmp/$FILE_RU"
 
