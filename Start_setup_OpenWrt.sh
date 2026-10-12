@@ -264,47 +264,65 @@ install_splify() {
 }
 
 install_internet_detector() {
-    echo -e "${GREEN}>>> Устанавливаю Internet Detector...${NC}"
+    echo -e "${GREEN}>>> Устанавливаю Internet Detector (авто-определение версии)...${NC}"
     if ! command -v wget >/dev/null 2>&1; then
         $INSTALL_CMD wget || return 1
     fi
 
     if [ "$RELEASE" = "25.12" ] || [ "$PKG_MGR" = "apk" ]; then
-        wget --no-check-certificate -O /tmp/internet-detector.apk https://github.com/gSpotx2f/packages-openwrt/raw/master/25.12/internet-detector-1.7.4-r1.apk
-        apk --allow-untrusted add /tmp/internet-detector.apk
-        rm -f /tmp/internet-detector.apk
-
-        service internet-detector start
-        service internet-detector enable
-
-        wget --no-check-certificate -O /tmp/luci-app-internet-detector.apk https://github.com/gSpotx2f/packages-openwrt/raw/master/25.12/luci-app-internet-detector-1.7.4-r1.apk
-        apk --allow-untrusted add /tmp/luci-app-internet-detector.apk
-        rm -f /tmp/luci-app-internet-detector.apk
-
-        service rpcd restart
-
-        wget --no-check-certificate -O /tmp/luci-i18n-internet-detector-ru.apk https://github.com/gSpotx2f/packages-openwrt/raw/master/25.12/luci-i18n-internet-detector-ru-1.7.4-r1.apk
-        apk --allow-untrusted add /tmp/luci-i18n-internet-detector-ru.apk
-        rm -f /tmp/luci-i18n-internet-detector-ru.apk
+        BRANCH="25.12"
+        EXT="apk"
     else
-        wget --no-check-certificate -O /tmp/internet-detector.ipk https://github.com/gSpotx2f/packages-openwrt/raw/master/24.10/internet-detector_1.7.4-r1_all.ipk
-        opkg install /tmp/internet-detector.ipk
-        rm -f /tmp/internet-detector.ipk
-
-        service internet-detector start
-        service internet-detector enable
-
-        wget --no-check-certificate -O /tmp/luci-app-internet-detector.ipk https://github.com/gSpotx2f/packages-openwrt/raw/master/24.10/luci-app-internet-detector_1.7.4-r1_all.ipk
-        opkg install /tmp/luci-app-internet-detector.ipk
-        rm -f /tmp/luci-app-internet-detector.ipk
-
-        service rpcd restart
-
-        wget --no-check-certificate -O /tmp/luci-i18n-internet-detector-ru.ipk https://github.com/gSpotx2f/packages-openwrt/raw/master/24.10/luci-i18n-internet-detector-ru_1.7.4-r1_all.ipk
-        opkg install /tmp/luci-i18n-internet-detector-ru.ipk
-        rm -f /tmp/luci-i18n-internet-detector-ru.ipk
+        BRANCH="24.10"
+        EXT="ipk"
     fi
-    echo -e "${GREEN}>>> Internet Detector установлен${NC}"
+
+    echo -e "${BLUE}>>> Проверяю свежие версии в репозитории ($BRANCH)...${NC}"
+    API_URL="https://api.github.com/repos/gSpotx2f/packages-openwrt/contents/$BRANCH"
+    
+    API_RESPONSE=$(wget -qO- "$API_URL")
+
+    if [ "$EXT" = "apk" ]; then
+        FILE_CORE=$(echo "$API_RESPONSE" | grep -oE "internet-detector-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
+        FILE_LUCI=$(echo "$API_RESPONSE" | grep -oE "luci-app-internet-detector-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
+        FILE_RU=$(echo "$API_RESPONSE" | grep -oE "luci-i18n-internet-detector-ru-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
+    else
+        FILE_CORE=$(echo "$API_RESPONSE" | grep -oE "internet-detector_[0-9\.-]+_[a-z0-9_]+\.ipk" | head -n 1)
+        FILE_LUCI=$(echo "$API_RESPONSE" | grep -oE "luci-app-internet-detector_[0-9\.-]+_[a-z0-9_]+\.ipk" | head -n 1)
+        FILE_RU=$(echo "$API_RESPONSE" | grep -oE "luci-i18n-internet-detector-ru_[0-9\.-]+_[a-z0-9_]+\.ipk" | head -n 1)
+    fi
+
+    if [ -z "$FILE_CORE" ] || [ -z "$FILE_LUCI" ] || [ -z "$FILE_RU" ]; then
+        echo -e "${RED}Не удалось автоматически определить версии через API GitHub!${NC}"
+        return 1
+    fi
+
+    RAW_BASE="https://github.com/gSpotx2f/packages-openwrt/raw/master/$BRANCH"
+
+    # Установка Core
+    echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_CORE${NC}"
+    wget --no-check-certificate -O "/tmp/$FILE_CORE" "$RAW_BASE/$FILE_CORE"
+    $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_CORE"
+    rm -f "/tmp/$FILE_CORE"
+
+    service internet-detector start
+    service internet-detector enable
+
+    # Установка LuCI App
+    echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_LUCI${NC}"
+    wget --no-check-certificate -O "/tmp/$FILE_LUCI" "$RAW_BASE/$FILE_LUCI"
+    $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_LUCI"
+    rm -f "/tmp/$FILE_LUCI"
+
+    service rpcd restart
+
+    # Установка Localization (RU)
+    echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_RU${NC}"
+    wget --no-check-certificate -O "/tmp/$FILE_RU" "$RAW_BASE/$FILE_RU"
+    $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_RU"
+    rm -f "/tmp/$FILE_RU"
+
+    echo -e "${GREEN}>>> Internet Detector успешно установлен!${NC}"
 }
 
 install_theme() {
