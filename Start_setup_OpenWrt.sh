@@ -11,6 +11,9 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# Глобальная переменная для Network ID ZeroTier
+ZEROTIER_NET_ID=""
+
 # ---------- Определение пакетного менеджера ----------
 if command -v apk >/dev/null 2>&1; then
     PKG_MGR="apk"
@@ -78,8 +81,9 @@ ZAPRET_NUM=$((TOTAL_PACKAGES_COUNT + 3))
 SPLIFY_NUM=$((TOTAL_PACKAGES_COUNT + 4))
 INETDET_NUM=$((TOTAL_PACKAGES_COUNT + 5))
 THEME_NUM=$((TOTAL_PACKAGES_COUNT + 6))
-FIXAPK_NUM=$((TOTAL_PACKAGES_COUNT + 7))
-IPV6_NUM=$((TOTAL_PACKAGES_COUNT + 8))
+ZEROTIER_NUM=$((TOTAL_PACKAGES_COUNT + 7))
+FIXAPK_NUM=$((TOTAL_PACKAGES_COUNT + 8))
+IPV6_NUM=$((TOTAL_PACKAGES_COUNT + 9))
 
 # Отрисовка меню
 echo -e "${CYAN}--- Базовые пакеты и локализация ---${NC}"
@@ -98,6 +102,7 @@ printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$ZAPRET_NUM" "Zapret Manager" "Уп
 printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$SPLIFY_NUM" "Splify2" "Инструмент маршрутизации трафика"
 printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$INETDET_NUM" "Internet Detector" "Детектор подключения с русификатором"
 printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$THEME_NUM" "LuCI Theme Footstrap" "Установка современной темы оформления"
+printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$ZEROTIER_NUM" "ZeroTier" "VPN-сеть для доступа к роутеру"
 
 echo ""
 echo -e "${CYAN}--- Система и сеть ---${NC}"
@@ -283,7 +288,6 @@ install_internet_detector() {
     echo -e "${BLUE}>>> Сканирую репозиторий GitHub ($BRANCH)...${NC}"
     WEB_URL="https://github.com/gSpotx2f/packages-openwrt/tree/master/$BRANCH"
     
-    # Скачиваем HTML страницу репозитория с User-Agent
     HTML_CONTENT=$(wget -qO- --header="User-Agent: Mozilla/5.0" "$WEB_URL")
 
     if [ "$EXT" = "apk" ]; then
@@ -292,14 +296,12 @@ install_internet_detector() {
         FILE_RU=$(echo "$HTML_CONTENT" | grep -oE "luci-i18n-internet-detector-ru-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
     else
         FILE_CORE=$(echo "$HTML_CONTENT" | grep -oE "internet-detector_[0-9\.-]_[a-z0-9_]+\.ipk" | head -n 1)
-        # Улучшенный шаблон поиска для .ipk файлов
         [ -z "$FILE_CORE" ] && FILE_CORE=$(echo "$HTML_CONTENT" | grep -oE "internet-detector_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
         
         FILE_LUCI=$(echo "$HTML_CONTENT" | grep -oE "luci-app-internet-detector_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
         FILE_RU=$(echo "$HTML_CONTENT" | grep -oE "luci-i18n-internet-detector-ru_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
     fi
 
-    # Если автоматический парсинг не сработал, подстрахуемся дефолтными именами r2
     if [ -z "$FILE_CORE" ]; then
         echo -e "${YELLOW}Не удалось автоматически найти имена через веб-страницу, используем r2 по умолчанию...${NC}"
         if [ "$EXT" = "apk" ]; then
@@ -315,7 +317,6 @@ install_internet_detector() {
 
     RAW_BASE="https://github.com/gSpotx2f/packages-openwrt/raw/master/$BRANCH"
 
-    # Установка Core
     echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_CORE${NC}"
     wget --no-check-certificate -O "/tmp/$FILE_CORE" "$RAW_BASE/$FILE_CORE" || { echo -e "${RED}Ошибка скачивания Core${NC}"; return 1; }
     $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_CORE"
@@ -324,7 +325,6 @@ install_internet_detector() {
     service internet-detector start 2>/dev/null
     service internet-detector enable 2>/dev/null
 
-    # Установка LuCI App
     echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_LUCI${NC}"
     wget --no-check-certificate -O "/tmp/$FILE_LUCI" "$RAW_BASE/$FILE_LUCI" || { echo -e "${RED}Ошибка скачивания LuCI App${NC}"; return 1; }
     $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_LUCI"
@@ -332,7 +332,6 @@ install_internet_detector() {
 
     service rpcd restart 2>/dev/null
 
-    # Установка Localization (RU)
     echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_RU${NC}"
     wget --no-check-certificate -O "/tmp/$FILE_RU" "$RAW_BASE/$FILE_RU" || { echo -e "${RED}Ошибка скачивания локализации${NC}"; return 1; }
     $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_RU"
@@ -358,6 +357,48 @@ install_theme() {
     }
 
     echo -e "${GREEN}>>> Тема и локализация обработаны${NC}"
+}
+
+install_zerotier() {
+    echo -e "${GREEN}>>> Устанавливаю ZeroTier...${NC}"
+    $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier luci-i18n-zerotier-ru 2>/dev/null || \
+    $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier 2>/dev/null || \
+    $INSTALL_CMD $ALLOW_UNTRUSTED zerotier || {
+        echo -e "${RED}Ошибка установки ZeroTier${NC}"
+        return 1
+    }
+
+    /etc/init.d/zerotier enable
+    /etc/init.d/zerotier start
+
+    if [ -z "$ZEROTIER_NET_ID" ]; then
+        echo ""
+        echo -e "${CYAN}Введите 16-значный ID вашей сети ZeroTier (Network ID):${NC}"
+        read -r ZEROTIER_NET_ID
+    fi
+
+    if [ -n "$ZEROTIER_NET_ID" ]; then
+        echo -e "${GREEN}>>> Подключаюсь к сети ZeroTier: $ZEROTIER_NET_ID${NC}"
+        zerotier-cli join "$ZEROTIER_NET_ID"
+    else
+        echo -e "${YELLOW}Network ID не введен. Вы сможете подключить сеть позже через LuCI или командную строку (zerotier-cli join <ID>).${NC}"
+    fi
+
+    echo -e "${GREEN}>>> Настраиваю сетевой интерфейс и фаервол для ZeroTier (доступ к веб-админке и SSH)...${NC}"
+    uci set network.zerotier=interface
+    uci set network.zerotier.proto='none'
+    uci set network.zerotier.device='zt+'
+    
+    if uci get firewall.@zone[0].name | grep -q "lan"; then
+        uci add_list firewall.@zone[0].network='zerotier' 2>/dev/null || true
+    fi
+    uci commit network
+    uci commit firewall
+
+    /etc/init.d/network restart
+    /etc/init.d/firewall restart
+    echo -e "${GREEN}>>> ZeroTier успешно установлен и настроен!${NC}"
+    echo -e "${YELLOW}Не забудьте авторизовать устройство в панели управления ZeroTier (my.zerotier.com).${NC}"
 }
 
 fix_apk_luci() {
@@ -396,6 +437,12 @@ disable_ipv6() {
 # ---------- Логика выполнения ----------
 if [ "$choice" = "0" ]; then
     echo -e "${YELLOW}>>> Устанавливаю все компоненты и применяю настройки...${NC}"
+    
+    # Запрос ID сети заранее для пункта "установить всё"
+    echo ""
+    echo -e "${CYAN}Введите 16-значный ID вашей сети ZeroTier (Network ID) [можно пропустить, нажав Enter]:${NC}"
+    read -r ZEROTIER_NET_ID
+
     echo "$PACKAGES" | while IFS='|' read -r pkg desc; do
         [ -z "$pkg" ] && continue
         install_pkg "$pkg"
@@ -405,6 +452,7 @@ if [ "$choice" = "0" ]; then
     install_splify
     install_internet_detector
     install_theme
+    install_zerotier
     fix_apk_luci
     disable_ipv6
 else
@@ -438,6 +486,10 @@ else
         fi
         if [ "$num" -eq "$THEME_NUM" ]; then
             install_theme
+            continue
+        fi
+        if [ "$num" -eq "$ZEROTIER_NUM" ]; then
+            install_zerotier
             continue
         fi
         if [ "$num" -eq "$FIXAPK_NUM" ]; then
