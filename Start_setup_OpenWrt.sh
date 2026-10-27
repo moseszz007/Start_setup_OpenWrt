@@ -360,16 +360,13 @@ install_theme() {
 }
 
 install_zerotier() {
-    echo -e "${GREEN}>>> Устанавливаю ZeroTier...${NC}"
+    echo -e "${GREEN}>>> Устанавливаю ZeroTier (поддержка opkg/apk)...${NC}"
     $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier luci-i18n-zerotier-ru 2>/dev/null || \
     $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier 2>/dev/null || \
     $INSTALL_CMD $ALLOW_UNTRUSTED zerotier || {
         echo -e "${RED}Ошибка установки ZeroTier${NC}"
         return 1
     }
-
-    /etc/init.d/zerotier enable
-    /etc/init.d/zerotier start
 
     if [ -z "$ZEROTIER_NET_ID" ]; then
         echo ""
@@ -378,27 +375,54 @@ install_zerotier() {
     fi
 
     if [ -n "$ZEROTIER_NET_ID" ]; then
-        echo -e "${GREEN}>>> Подключаюсь к сети ZeroTier: $ZEROTIER_NET_ID${NC}"
-        zerotier-cli join "$ZEROTIER_NET_ID"
+        echo -e "${GREEN}>>> Наношу конфигурацию ZeroTier через UCI...${NC}"
+        uci set zerotier.openwrt_network=zerotier
+        uci set zerotier.openwrt_network.enabled='1'
+        uci -q delete zerotier.openwrt_network.join
+        uci add_list zerotier.openwrt_network.join="$ZEROTIER_NET_ID"
+        uci commit zerotier
     else
-        echo -e "${YELLOW}Network ID не введен. Вы сможете подключить сеть позже через LuCI или командную строку (zerotier-cli join <ID>).${NC}"
+        echo -e "${YELLOW}Network ID не введен. Подключение к сети пропущено.${NC}"
     fi
 
-    echo -e "${GREEN}>>> Настраиваю сетевой интерфейс и фаервол для ZeroTier (доступ к веб-админке и SSH)...${NC}"
-    uci set network.zerotier=interface
-    uci set network.zerotier.proto='none'
-    uci set network.zerotier.device='zt+'
-    
-    if uci get firewall.@zone[0].name | grep -q "lan"; then
-        uci add_list firewall.@zone[0].network='zerotier' 2>/dev/null || true
-    fi
-    uci commit network
-    uci commit firewall
+    echo -e "${GREEN}>>> Запускаю службу ZeroTier...${NC}"
+    /etc/init.d/zerotier enable
+    /etc/init.d/zerotier restart
 
-    /etc/init.d/network restart
-    /etc/init.d/firewall restart
-    echo -e "${GREEN}>>> ZeroTier успешно установлен и настроен!${NC}"
-    echo -e "${YELLOW}Не забудьте авторизовать устройство в панели управления ZeroTier (my.zerotier.com).${NC}"
+    echo -e "${BLUE}>>> Ожидание инициализации и генерации виртуального интерфейса (3 сек)...${NC}"
+    sleep 3
+
+    # Динамический поиск реального уникального интерфейса ztXXXXX
+    ZT_IFACE=$(ip -o link show | awk -F': ' '$2 ~ /^zt/ {print $2}' | head -n 1)
+
+    if [ -n "$ZT_IFACE" ]; then
+        echo -e "${GREEN}>>> Обнаружен интерфейс ZeroTier: $ZT_IFACE. Привязываю к сети...${NC}"
+        uci set network.zerotier=interface
+        uci set network.zerotier.proto='none'
+        uci set network.zerotier.device="$ZT_IFACE"
+        
+        # Создаем отдельную зону фаервола 'zerotier' для доступа к роутеру (SSH / LuCI)
+        if ! uci show firewall | grep -q "name='zerotier'"; then
+            uci add firewall zone
+            uci set firewall.@zone[-1].name='zerotier'
+            uci set firewall.@zone[-1].input='ACCEPT'
+            uci set firewall.@zone[-1].output='ACCEPT'
+            uci set firewall.@zone[-1].forward='ACCEPT'
+            uci set firewall.@zone[-1].masq='1'
+            uci add_list firewall.@zone[-1].network='zerotier'
+        fi
+        
+        uci commit network
+        uci commit firewall
+
+        /etc/init.d/network restart
+        /etc/init.d/firewall restart
+        echo -e "${GREEN}>>> ZeroTier успешно настроен и привязан к интерфейсу $ZT_IFACE!${NC}"
+    else
+        echo -e "${YELLOW}Предупреждение: Интерфейс zt* не появился в системе.${NC}"
+        echo -e "${YELLOW}Убедитесь, что роутер имеет доступ в интернет, а затем перезагрузите устройство.${NC}"
+    fi
+    echo -e "${CYAN}Важно: Не забудьте авторизовать этот роутер в панели управления на https://my.zerotier.com${NC}"
 }
 
 fix_apk_luci() {
@@ -438,7 +462,7 @@ disable_ipv6() {
 if [ "$choice" = "0" ]; then
     echo -e "${YELLOW}>>> Устанавливаю все компоненты и применяю настройки...${NC}"
     
-    # Запрос ID сети заранее для пункта "установить всё"
+    # Запрос ID сети заранее при выборе пункта "0"
     echo ""
     echo -e "${CYAN}Введите 16-значный ID вашей сети ZeroTier (Network ID) [можно пропустить, нажав Enter]:${NC}"
     read -r ZEROTIER_NET_ID
@@ -480,7 +504,7 @@ else
             install_splify
             continue
         fi
-        if [ "$num" -eq "$INETDET_NUM" ];        then
+        if [ "$num" -eq "$INETDET_NUM" ]; then
             install_internet_detector
             continue
         fi
