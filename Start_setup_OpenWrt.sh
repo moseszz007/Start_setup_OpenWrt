@@ -183,8 +183,8 @@ config splify2_backup 'splify2'
 	list splify2_orig '	option listen_port '\''5554'\'''
 
 config https-dns-proxy
-	option resolver_url 'https://doh.opendns.com/dns-query'
-	option bootstrap_dns '208.67.222.222,208.67.220.220,2620:119:35::35,2620:119:53::53'
+	option resolver_url 'https://dns.alidns.com/dns-query'
+	option bootstrap_dns '223.5.5.5,223.6.6.6,2400:3200::1,2400:3200:baba::1'
 	option listen_port '5053'
 
 config https-dns-proxy
@@ -193,8 +193,8 @@ config https-dns-proxy
 	option listen_port '5054'
 
 config https-dns-proxy
-	option resolver_url 'https://freedns.controld.com/p0'
-	option bootstrap_dns '76.76.2.0,2606:1a40::0'
+	option resolver_url 'https://1.1.1.1/dns-query'
+	option bootstrap_dns '1.1.1.1'
 	option listen_port '5055'
 
 config https-dns-proxy
