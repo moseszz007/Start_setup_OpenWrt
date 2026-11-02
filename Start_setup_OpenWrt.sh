@@ -919,11 +919,39 @@ server=/zapier.com/127.0.0.1#5554
 server=/zapier.com/127.0.0.1#5555
 EOF
 
-    echo -e "${GREEN}>>> Настраиваю dnsmasq для чтения серверов из /etc/dnsmasq.servers...${NC}"
-    uci set dhcp.@dnsmasq[0].noresolv='1'
-    uci set dhcp.@dnsmasq[0].confdir='/etc/dnsmasq.servers'
-    # Удаляем стандартные глобальные серверы, раз используем таргетированные
-    uci -q delete dhcp.@dnsmasq[0].server
+    echo -e "${GREEN}>>> Настраиваю параметры dnsmasq в файле конфигурации dhcp...${NC}"
+    # Очищаем старую конфигурацию dnsmasq (первую секцию), чтобы записать актуальные параметры
+    uci -q delete dhcp.@dnsmasq[0]
+    uci add dhcp dnsmasq
+    uci set dhcp.@dnsmasq[0].domainneeded='1'
+    uci set dhcp.@dnsmasq[0].localise_queries='1'
+    uci set dhcp.@dnsmasq[0].rebind_protection='1'
+    uci set dhcp.@dnsmasq[0].local='/lan/'
+    uci set dhcp.@dnsmasq[0].domain='lan'
+    uci set dhcp.@dnsmasq[0].expandhosts='1'
+    uci set dhcp.@dnsmasq[0].authoritative='1'
+    uci set dhcp.@dnsmasq[0].readethers='1'
+    uci set dhcp.@dnsmasq[0].leasefile='/tmp/dhcp.leases'
+    uci set dhcp.@dnsmasq[0].localservice='1'
+    uci set dhcp.@dnsmasq[0].ednspacket_max='1232'
+    uci set dhcp.@dnsmasq[0].cachesize='1000'
+    uci set dhcp.@dnsmasq[0].port='53'
+    uci set dhcp.@dnsmasq[0].allservers='1'
+    uci set dhcp.@dnsmasq[0].doh_backup_noresolv='1'
+    uci add_list dhcp.@dnsmasq[0].doh_backup_server='127.0.0.1#5353'
+    uci add_list dhcp.@dnsmasq[0].doh_server='127.0.0.1#5053'
+    uci add_list dhcp.@dnsmasq[0].doh_server='127.0.0.1#5054'
+    uci add_list dhcp.@dnsmasq[0].doh_server='127.0.0.1#5055'
+    uci add_list dhcp.@dnsmasq[0].doh_server='127.0.0.1#5554'
+    uci add_list dhcp.@dnsmasq[0].doh_server='127.0.0.1#5555'
+    uci set dhcp.@dnsmasq[0].serversfile='/etc/dnsmasq.servers'
+    uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#5055'
+    uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#5053'
+    uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#5054'
+    uci add_list dhcp.@dnsmasq[0].server='/.ru/77.88.8.1'
+    uci add_list dhcp.@dnsmasq[0].server='/.ru/77.88.8.8'
+    uci add_list dhcp.@dnsmasq[0].server='/.xn--p1ai/77.88.8.8'
+    uci add_list dhcp.@dnsmasq[0].server='/.xn--p1ai/77.88.8.1'
     uci commit dhcp
 
     /etc/init.d/https-dns-proxy enable 2>/dev/null
@@ -931,284 +959,3 @@ EOF
     /etc/init.d/dnsmasq restart
     echo -e "${GREEN}>>> Конфигурация https-dns-proxy и dnsmasq успешно применена${NC}"
 }
-
-install_https_proxy() {
-    echo -e "${GREEN}>>> Устанавливаю https-dns-proxy и LuCI-модуль...${NC}"
-    $INSTALL_CMD $ALLOW_UNTRUSTED https-dns-proxy luci-app-https-dns-proxy 2>/dev/null || \
-    $INSTALL_CMD $ALLOW_UNTRUSTED https-dns-proxy || {
-        echo -e "${RED}Не удалось установить https-dns-proxy${NC}"
-        return 1
-    }
-
-    apply_https_proxy_config
-}
-
-install_zapret() {
-    echo -e "${GREEN}>>> Устанавливаю Zapret Manager...${NC}"
-    if ! command -v wget >/dev/null 2>&1; then
-        $INSTALL_CMD wget || return 1
-    fi
-    sh <(wget -qO - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh) || {
-        echo -e "${RED}Ошибка установки Zapret Manager${NC}"
-        return 1
-    }
-    echo -e "${GREEN}>>> Zapret Manager установлен${NC}"
-}
-
-install_splify() {
-    echo -e "${GREEN}>>> Устанавливаю Splify2...${NC}"
-    if ! command -v wget >/dev/null 2>&1; then
-        $INSTALL_CMD wget || return 1
-    fi
-    sh -c "$(wget -qO- https://gitlab.com/xyzmean/splify2/-/raw/main/install.sh)" || {
-        echo -e "${RED}Ошибка установки Splify2${NC}"
-        return 1
-    }
-    echo -e "${GREEN}>>> Splify2 установлен${NC}"
-}
-
-install_internet_detector() {
-    echo -e "${GREEN}>>> Устанавливаю Internet Detector (авто-определение версии)...${NC}"
-    if ! command -v wget >/dev/null 2>&1; then
-        $INSTALL_CMD wget || return 1
-    fi
-
-    if [ "$RELEASE" = "25.12" ] || [ "$PKG_MGR" = "apk" ]; then
-        BRANCH="25.12"
-        EXT="apk"
-    else
-        BRANCH="24.10"
-        EXT="ipk"
-    fi
-
-    echo -e "${BLUE}>>> Сканирую репозиторий GitHub ($BRANCH)...${NC}"
-    WEB_URL="https://github.com/gSpotx2f/packages-openwrt/tree/master/$BRANCH"
-    
-    HTML_CONTENT=$(wget -qO- --header="User-Agent: Mozilla/5.0" "$WEB_URL")
-
-    if [ "$EXT" = "apk" ]; then
-        FILE_CORE=$(echo "$HTML_CONTENT" | grep -oE "internet-detector-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
-        FILE_LUCI=$(echo "$HTML_CONTENT" | grep -oE "luci-app-internet-detector-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
-        FILE_RU=$(echo "$HTML_CONTENT" | grep -oE "luci-i18n-internet-detector-ru-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
-    else
-        FILE_CORE=$(echo "$HTML_CONTENT" | grep -oE "internet-detector_[0-9\.-]_[a-z0-9_]+\.ipk" | head -n 1)
-        [ -z "$FILE_CORE" ] && FILE_CORE=$(echo "$HTML_CONTENT" | grep -oE "internet-detector_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
-        
-        FILE_LUCI=$(echo "$HTML_CONTENT" | grep -oE "luci-app-internet-detector_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
-        FILE_RU=$(echo "$HTML_CONTENT" | grep -oE "luci-i18n-internet-detector-ru_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
-    fi
-
-    if [ -z "$FILE_CORE" ]; then
-        echo -e "${YELLOW}Не удалось автоматически найти имена через веб-страницу, используем r2 по умолчанию...${NC}"
-        if [ "$EXT" = "apk" ]; then
-            FILE_CORE="internet-detector-1.7.4-r2.apk"
-            FILE_LUCI="luci-app-internet-detector-1.7.4-r2.apk"
-            FILE_RU="luci-i18n-internet-detector-ru-1.7.4-r2.apk"
-        else
-            FILE_CORE="internet-detector_1.7.4-r2_all.ipk"
-            FILE_LUCI="luci-app-internet-detector_1.7.4-r2_all.ipk"
-            FILE_RU="luci-i18n-internet-detector-ru_1.7.4-r2_all.ipk"
-        fi
-    fi
-
-    RAW_BASE="https://github.com/gSpotx2f/packages-openwrt/raw/master/$BRANCH"
-
-    echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_CORE${NC}"
-    wget --no-check-certificate -O "/tmp/$FILE_CORE" "$RAW_BASE/$FILE_CORE" || { echo -e "${RED}Ошибка скачивания Core${NC}"; return 1; }
-    $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_CORE"
-    rm -f "/tmp/$FILE_CORE"
-
-    service internet-detector start 2>/dev/null
-    service internet-detector enable 2>/dev/null
-
-    echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_LUCI${NC}"
-    wget --no-check-certificate -O "/tmp/$FILE_LUCI" "$RAW_BASE/$FILE_LUCI" || { echo -e "${RED}Ошибка скачивания LuCI App${NC}"; return 1; }
-    $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_LUCI"
-    rm -f "/tmp/$FILE_LUCI"
-
-    service rpcd restart 2>/dev/null
-
-    echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_RU${NC}"
-    wget --no-check-certificate -O "/tmp/$FILE_RU" "$RAW_BASE/$FILE_RU" || { echo -e "${RED}Ошибка скачивания локализации${NC}"; return 1; }
-    $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_RU"
-    rm -f "/tmp/$FILE_RU"
-
-    echo -e "${GREEN}>>> Internet Detector успешно установлен!${NC}"
-}
-
-install_zerotier() {
-    echo -e "${GREEN}>>> Устанавливаю ZeroTier (поддержка opkg/apk)...${NC}"
-    $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier luci-i18n-zerotier-ru 2>/dev/null || \
-    $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier 2>/dev/null || \
-    $INSTALL_CMD $ALLOW_UNTRUSTED zerotier || {
-        echo -e "${RED}Ошибка установки ZeroTier${NC}"
-        return 1
-    }
-
-    if [ -z "$ZEROTIER_NET_ID" ]; then
-        echo ""
-        echo -e "${CYAN}Введите 16-значный ID вашей сети ZeroTier (Network ID):${NC}"
-        read -r ZEROTIER_NET_ID
-    fi
-
-    if [ -n "$ZEROTIER_NET_ID" ]; then
-        echo -e "${GREEN}>>> Наношу конфигурацию ZeroTier через UCI...${NC}"
-        uci set zerotier.openwrt_network=zerotier
-        uci set zerotier.openwrt_network.enabled='1'
-        uci -q delete zerotier.openwrt_network.join
-        uci add_list zerotier.openwrt_network.join="$ZEROTIER_NET_ID"
-        uci commit zerotier
-    else
-        echo -e "${YELLOW}Network ID не введен. Подключение к сети пропущено.${NC}"
-    fi
-
-    echo -e "${GREEN}>>> Запускаю службу ZeroTier...${NC}"
-    /etc/init.d/zerotier enable
-    /etc/init.d/zerotier restart
-
-    echo -e "${BLUE}>>> Ожидание инициализации и генерации виртуального интерфейса (3 сек)...${NC}"
-    sleep 3
-
-    # Динамический поиск реального уникального интерфейса ztXXXXX
-    ZT_IFACE=$(ip -o link show | awk -F': ' '$2 ~ /^zt/ {print $2}' | head -n 1)
-
-    if [ -n "$ZT_IFACE" ]; then
-        echo -e "${GREEN}>>> Обнаружен интерфейс ZeroTier: $ZT_IFACE. Привязываю к сети...${NC}"
-        uci set network.zerotier=interface
-        uci set network.zerotier.proto='none'
-        uci set network.zerotier.device="$ZT_IFACE"
-        
-        # Создаем отдельную зону фаервола 'zerotier' для доступа к роутеру (SSH / LuCI)
-        if ! uci show firewall | grep -q "name='zerotier'"; then
-            uci add firewall zone
-            uci set firewall.@zone[-1].name='zerotier'
-            uci set firewall.@zone[-1].input='ACCEPT'
-            uci set firewall.@zone[-1].output='ACCEPT'
-            uci set firewall.@zone[-1].forward='ACCEPT'
-            uci set firewall.@zone[-1].masq='1'
-            uci add_list firewall.@zone[-1].network='zerotier'
-        fi
-        
-        uci commit network
-        uci commit firewall
-
-        /etc/init.d/network restart
-        /etc/init.d/firewall restart
-        echo -e "${GREEN}>>> ZeroTier успешно настроен и привязан к интерфейсу $ZT_IFACE!${NC}"
-    else
-        echo -e "${YELLOW}Предупреждение: Интерфейс zt* не появился в системе.${NC}"
-        echo -e "${YELLOW}Убедитесь, что роутер имеет доступ в интернет, а затем перезагрузите устройство.${NC}"
-    fi
-    echo -e "${CYAN}Важно: Не забудьте авторизовать этот роутер в панели управления на https://my.zerotier.com${NC}"
-}
-
-fix_apk_luci() {
-    echo -e "${GREEN}>>> Применяю фикс пакетного менеджера для LuCI...${NC}"
-    if [ -f /usr/libexec/package-manager-call ]; then
-        sed -i 's/action="add"/action="add --allow-untrusted"/g' /usr/libexec/package-manager-call
-        echo -e "${GREEN}>>> Фикс успешно применен${NC}"
-    else
-        echo -e "${YELLOW}Файл /usr/libexec/package-manager-call не найден (возможно, не версия 25.12)${NC}"
-    fi
-}
-
-disable_ipv6() {
-    echo -e "${GREEN}>>> Отключаю IPv6...${NC}"
-    uci set network.lan.ipv6='0'
-    uci set network.wan.ipv6='0'
-    uci set network.lan.delegate="0"
-
-    uci set dhcp.lan.dhcpv6='disabled'
-    uci -q delete dhcp.lan.dhcpv6
-    uci -q delete dhcp.lan.ra
-
-    uci -q delete network.globals.ula_prefix
-
-    /etc/init.d/odhcpd disable
-    /etc/init.d/odhcpd stop
-
-    uci set dhcp.@dnsmasq[0].filter_aaaa='1'
-
-    uci commit
-    /etc/init.d/network restart
-    /etc/init.d/dnsmasq restart
-    echo -e "${GREEN}>>> IPv6 успешно отключен${NC}"
-}
-
-# ---------- Логика выполнения ----------
-if [ "$choice" = "0" ]; then
-    echo -e "${YELLOW}>>> Устанавливаю все компоненты и применяю настройки...${NC}"
-    
-    # Запрос ID сети заранее при выборе пункта "0"
-    echo ""
-    echo -e "${CYAN}Введите 16-значный ID вашей сети ZeroTier (Network ID) [можно пропустить, нажав Enter]:${NC}"
-    read -r ZEROTIER_NET_ID
-
-    echo "$PACKAGES" | while IFS='|' read -r pkg desc; do
-        [ -z "$pkg" ] && continue
-        install_pkg "$pkg"
-    done
-    install_https_proxy
-    install_zapret
-    install_splify
-    install_internet_detector
-    install_zerotier
-    fix_apk_luci
-    disable_ipv6
-else
-    for num in $choice; do
-        case "$num" in
-            *[!0-9]*) 
-                echo -e "${RED}Неверный выбор: $num${NC}"
-                continue 
-                ;;
-        esac
-
-        if [ "$num" -eq "$HTTPS_DNS_PROXY_NUM" ]; then
-            install_https_proxy
-            continue
-        fi
-        if [ "$num" -eq "$CFG_HTTPS_PROXY_NUM" ]; then
-            apply_https_proxy_config
-            continue
-        fi
-        if [ "$num" -eq "$ZAPRET_NUM" ]; then
-            install_zapret
-            continue
-        fi
-        if [ "$num" -eq "$SPLIFY_NUM" ]; then
-            install_splify
-            continue
-        fi
-        if [ "$num" -eq "$INETDET_NUM" ]; then
-            install_internet_detector
-            continue
-        fi
-        if [ "$num" -eq "$ZEROTIER_NUM" ]; then
-            install_zerotier
-            continue
-        fi
-        if [ "$num" -eq "$FIXAPK_NUM" ]; then
-            fix_apk_luci
-            continue
-        fi
-        if [ "$num" -eq "$IPV6_NUM" ]; then
-            disable_ipv6
-            continue
-        fi
-
-        i=1
-        echo "$PACKAGES" | while IFS='|' read -r pkg desc; do
-            [ -z "$pkg" ] && continue
-            if [ "$i" -eq "$num" ]; then
-                install_pkg "$pkg"
-            fi
-            i=$((i + 1))
-        done
-    done
-fi
-
-echo ""
-echo -e "${BLUE}==================================================${NC}"
-echo -e "${GREEN}  Все задачи выполнены!${NC}"
-echo -e "${BLUE}==================================================${NC}"
