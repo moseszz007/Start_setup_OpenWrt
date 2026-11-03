@@ -188,8 +188,8 @@ config https-dns-proxy
 	option listen_port '5053'
 
 config https-dns-proxy
-	option resolver_url 'https://9.9.9.9/dns-query'
-	option bootstrap_dns '9.9.9.9'
+	option resolver_url 'https://8.8.8.8/dns-query'
+	option bootstrap_dns '8.8.8.8'
 	option listen_port '5054'
 
 config https-dns-proxy
