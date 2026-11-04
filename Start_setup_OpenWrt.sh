@@ -924,36 +924,36 @@ EOF
     # Очищаем старую конфигурацию dnsmasq (первую секцию), чтобы записать актуальные параметры
     uci -q delete dhcp.@dnsmasq[0]
     uci add dhcp dnsmasq
-    uci set dhcp.@dnsmasq[0].domainneeded='1'
-    uci set dhcp.@dnsmasq[0].localise_queries='1'
-    uci set dhcp.@dnsmasq[0].rebind_protection='1'
-    uci set dhcp.@dnsmasq[0].local='/lan/'
-    uci set dhcp.@dnsmasq[0].domain='lan'
-    uci set dhcp.@dnsmasq[0].expandhosts='1'
-    uci set dhcp.@dnsmasq[0].authoritative='1'
-    uci set dhcp.@dnsmasq[0].readethers='1'
-    uci set dhcp.@dnsmasq[0].leasefile='/tmp/dhcp.leases'
-    uci set dhcp.@dnsmasq[0].localservice='1'
-    uci set dhcp.@dnsmasq[0].ednspacket_max='1232'
-    uci set dhcp.@dnsmasq[0].cachesize='1000'
-    uci set dhcp.@dnsmasq[0].port='53'
-    uci set dhcp.@dnsmasq[0].allservers='1'
-    uci set dhcp.@dnsmasq[0].doh_backup_noresolv='1'
-    uci add_list dhcp.@dnsmasq[0].doh_backup_server='127.0.0.1#5353'
-    uci add_list dhcp.@dnsmasq[0].doh_server='127.0.0.1#5053'
-    uci add_list dhcp.@dnsmasq[0].doh_server='127.0.0.1#5054'
-    uci add_list dhcp.@dnsmasq[0].doh_server='127.0.0.1#5055'
-    uci add_list dhcp.@dnsmasq[0].doh_server='127.0.0.1#5554'
-    uci add_list dhcp.@dnsmasq[0].doh_server='127.0.0.1#5555'
-    uci set dhcp.@dnsmasq[0].serversfile='/etc/dnsmasq.servers'
-    uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#5055'
-    uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#5053'
-    uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#5054'
-    uci add_list dhcp.@dnsmasq[0].server='/.ru/77.88.8.1'
-    uci add_list dhcp.@dnsmasq[0].server='/.ru/77.88.8.8'
-    uci add_list dhcp.@dnsmasq[0].server='/.xn--p1ai/77.88.8.8'
-    uci add_list dhcp.@dnsmasq[0].server='/.xn--p1ai/77.88.8.1'
-    uci commit dhcp
+    # Основные опции
+# Основные опции
+uci set dhcp.@dnsmasq[0].domainneeded='1'
+uci set dhcp.@dnsmasq[0].localise_queries='1'
+uci set dhcp.@dnsmasq[0].rebind_protection='1'
+uci set dhcp.@dnsmasq[0].local='/lan/'
+uci set dhcp.@dnsmasq[0].domain='lan'
+uci set dhcp.@dnsmasq[0].expandhosts='1'
+uci set dhcp.@dnsmasq[0].authoritative='1'
+uci set dhcp.@dnsmasq[0].readethers='1'
+uci set dhcp.@dnsmasq[0].leasefile='/tmp/dhcp.leases'
+uci set dhcp.@dnsmasq[0].localservice='1'
+uci set dhcp.@dnsmasq[0].ednspacket_max='1232'
+uci set dhcp.@dnsmasq[0].cachesize='1000'
+uci set dhcp.@dnsmasq[0].port='53'
+uci set dhcp.@dnsmasq[0].allservers='1'
+uci set dhcp.@dnsmasq[0].serversfile='/etc/dnsmasq.servers'
+uci set dhcp.@dnsmasq[0].noresolv='1'
+
+# Очищаем старые server и добавляем новые
+uci -q delete dhcp.@dnsmasq[0].server
+uci add_list dhcp.@dnsmasq[0].server='/.ru/77.88.8.1'
+uci add_list dhcp.@dnsmasq[0].server='/.ru/77.88.8.8'
+uci add_list dhcp.@dnsmasq[0].server='/.xn--p1ai/77.88.8.8'
+uci add_list dhcp.@dnsmasq[0].server='/.xn--p1ai/77.88.8.1'
+uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#5053'
+uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#5054'
+uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#5055'
+
+uci commit dhcp
 
     /etc/init.d/https-dns-proxy enable 2>/dev/null
     /etc/init.d/https-dns-proxy restart 2>/dev/null
