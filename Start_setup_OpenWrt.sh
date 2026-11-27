@@ -105,14 +105,14 @@ DNSPROXY_PKG="luci-app-dnsproxy"
 DNSPROXY_FALLBACK="2026.11.27-r4"
 KOKA_REPO="$GH_USER/luci-theme-koka"
 KOKA_PKG="luci-theme-koka"
-KOKA_FALLBACK="2026.11.27-r20"
+KOKA_FALLBACK="2026.11.27-r21"
 
 # ---------- Загрузчик ----------
 DOWNLOADER=""
 detect_downloader() {
-    if command -v uclient-fetch >/dev/null 2>&1; then DOWNLOADER="uclient-fetch"
+    if command -v curl >/dev/null 2>&1; then DOWNLOADER="curl"
     elif command -v wget >/dev/null 2>&1; then DOWNLOADER="wget"
-    elif command -v curl >/dev/null 2>&1; then DOWNLOADER="curl"
+    elif command -v uclient-fetch >/dev/null 2>&1; then DOWNLOADER="uclient-fetch"
     else DOWNLOADER=""
     fi
 }
@@ -123,26 +123,50 @@ ensure_downloader() {
     info "Ставлю инструмент загрузки"
     $INSTALL_CMD ca-bundle >/dev/null 2>&1
     $INSTALL_CMD libustream-mbedtls >/dev/null 2>&1
-    $INSTALL_CMD wget-ssl >/dev/null 2>&1 || $INSTALL_CMD curl >/dev/null 2>&1
+    $INSTALL_CMD curl >/dev/null 2>&1 || $INSTALL_CMD wget-ssl >/dev/null 2>&1
     detect_downloader
     [ -n "$DOWNLOADER" ]
 }
 
+# Пробует все загрузчики по очереди: на части прошивок uclient-fetch
+# не умеет редиректы github.com, поэтому одного выбранного мало.
 http_get() {
-    case "$DOWNLOADER" in
-        uclient-fetch) uclient-fetch -q -T 25 --header="User-Agent: Start_setup_OpenWrt" -O - "$1" 2>/dev/null ;;
-        wget)          wget -q -T 25 --header="User-Agent: Start_setup_OpenWrt" -O - "$1" 2>/dev/null ;;
-        curl)          curl -fsSL --max-time 25 -A "Start_setup_OpenWrt" "$1" 2>/dev/null ;;
-    esac
+    _f="/tmp/setup-http.$$"
+    rm -f "$_f"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --max-time 25 -A "Start_setup_OpenWrt" -o "$_f" "$1" 2>/dev/null
+    fi
+    if [ ! -s "$_f" ] && command -v wget >/dev/null 2>&1; then
+        wget -q -T 25 --header="User-Agent: Start_setup_OpenWrt" -O "$_f" "$1" 2>/dev/null
+    fi
+    if [ ! -s "$_f" ] && command -v uclient-fetch >/dev/null 2>&1; then
+        uclient-fetch -q -T 25 --header="User-Agent: Start_setup_OpenWrt" -O "$_f" "$1" 2>/dev/null
+    fi
+    if [ -s "$_f" ]; then
+        cat "$_f"
+        rm -f "$_f"
+        return 0
+    fi
+    rm -f "$_f"
+    return 1
 }
 
 fetch_file() {
-    case "$DOWNLOADER" in
-        uclient-fetch) uclient-fetch -q -T 90 -O "$2" "$1" ;;
-        wget)          wget -q -T 90 -O "$2" "$1" ;;
-        curl)          curl -fsSL --max-time 90 -o "$2" "$1" ;;
-        *)             return 1 ;;
-    esac
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --max-time 120 -o "$2" "$1" && { DOWNLOADER="curl"; return 0; }
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -T 120 -O "$2" "$1" && { DOWNLOADER="wget"; return 0; }
+    fi
+    if command -v uclient-fetch >/dev/null 2>&1; then
+        uclient-fetch -q -T 120 -O "$2" "$1" && { DOWNLOADER="uclient-fetch"; return 0; }
+    fi
+    if [ "$DOWNLOADER" != "curl" ]; then
+        info "Ставлю curl для загрузки"
+        $INSTALL_CMD curl >>/tmp/setup-install.log 2>&1 && \
+            curl -fsSL --max-time 120 -o "$2" "$1" && { DOWNLOADER="curl"; return 0; }
+    fi
+    return 1
 }
 
 # github_asset <repo> <префикс имени> <ext> — ссылка на файл из последнего релиза
