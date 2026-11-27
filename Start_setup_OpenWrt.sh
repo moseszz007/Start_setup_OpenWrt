@@ -104,7 +104,7 @@ DNSPROXY_PKG="luci-app-dnsproxy"
 DNSPROXY_FALLBACK="2026.11.28-r1"
 KOKA_REPO="$GH_USER/luci-theme-koka"
 KOKA_PKG="luci-theme-koka"
-KOKA_FALLBACK="2026.11.28-r22"
+KOKA_FALLBACK="2026.11.28-r23"
 
 # Прямая ссылка на конкретный релиз — без GitHub API, без поиска "последнего"
 release_url() {   # <repo> <pkg> <версия> <apk|ipk>
