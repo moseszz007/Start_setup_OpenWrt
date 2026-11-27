@@ -52,15 +52,16 @@ luci-app-filemanager|Файловый менеджер в LuCI
 luci-i18n-filemanager-ru|Русский язык для файлового менеджера
 "
 
-# ---------- dnsproxy ----------
+# ---------- Собственные пакеты автора (GitHub Releases) ----------
+GH_USER="moseszz007"
+
+DNSPROXY_REPO="$GH_USER/luci-app-dnsproxy"
 DNSPROXY_PKG_NAME="luci-app-dnsproxy"
-if [ "$RELEASE" = "25.12" ]; then
-    DNSPROXY_URL="https://raw.githubusercontent.com/fantastic-packages/releases/25.12/packages/aarch64_cortex-a53/luci/luci-app-dnsproxy-26.250.33416~c43835f.apk"
-    DNSPROXY_FILE="/tmp/luci-app-dnsproxy.apk"
-else
-    DNSPROXY_URL="https://raw.githubusercontent.com/fantastic-packages/releases/archive/24.10/packages/aarch64_generic/luci/luci-app-dnsproxy_26.250.33416~c43835f_all.ipk"
-    DNSPROXY_FILE="/tmp/luci-app-dnsproxy.ipk"
-fi
+DNSPROXY_FALLBACK_VER="2026.11.27-r4"
+
+KOKA_REPO="$GH_USER/luci-theme-koka"
+KOKA_PKG_NAME="luci-theme-koka"
+KOKA_FALLBACK_VER="2026.11.27-r19"
 
 clear
 echo -e "${BLUE}==================================================${NC}"
@@ -81,9 +82,10 @@ ZAPRET_NUM=$((TOTAL_PACKAGES_COUNT + 3))
 SPLIFY_NUM=$((TOTAL_PACKAGES_COUNT + 4))
 INETDET_NUM=$((TOTAL_PACKAGES_COUNT + 5))
 THEME_NUM=$((TOTAL_PACKAGES_COUNT + 6))
-ZEROTIER_NUM=$((TOTAL_PACKAGES_COUNT + 7))
-FIXAPK_NUM=$((TOTAL_PACKAGES_COUNT + 8))
-IPV6_NUM=$((TOTAL_PACKAGES_COUNT + 9))
+KOKA_NUM=$((TOTAL_PACKAGES_COUNT + 7))
+ZEROTIER_NUM=$((TOTAL_PACKAGES_COUNT + 8))
+FIXAPK_NUM=$((TOTAL_PACKAGES_COUNT + 9))
+IPV6_NUM=$((TOTAL_PACKAGES_COUNT + 10))
 
 # Отрисовка меню
 echo -e "${CYAN}--- Базовые пакеты и локализация ---${NC}"
@@ -102,6 +104,7 @@ printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$ZAPRET_NUM" "Zapret Manager" "Уп
 printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$SPLIFY_NUM" "Splify2" "Инструмент маршрутизации трафика"
 printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$INETDET_NUM" "Internet Detector" "Детектор подключения с русификатором"
 printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$THEME_NUM" "LuCI Theme Footstrap" "Установка современной темы оформления"
+printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$KOKA_NUM" "LuCI Theme Koka" "Моя тема Koka Modern (скин + дашборд)"
 printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$ZEROTIER_NUM" "ZeroTier" "VPN-сеть для доступа к роутеру"
 
 echo ""
@@ -137,6 +140,90 @@ fi
 install_pkg() {
     echo -e "${GREEN}>>> Устанавливаю: $1${NC}"
     $INSTALL_CMD "$1" || echo -e "${RED}Не удалось установить $1${NC}"
+}
+
+# ---------- Скачивание с GitHub Releases ----------
+http_get() {
+    if command -v wget >/dev/null 2>&1; then
+        wget -qO- --header="User-Agent: Mozilla/5.0" "$1" 2>/dev/null
+    elif command -v curl >/dev/null 2>&1; then
+        curl -fsSL -A "Mozilla/5.0" "$1" 2>/dev/null
+    fi
+}
+
+fetch_file() {
+    if command -v wget >/dev/null 2>&1; then
+        wget -q --no-check-certificate -O "$2" "$1"
+    elif command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o "$2" "$1"
+    else
+        echo -e "${RED}Нет wget и curl${NC}"
+        return 1
+    fi
+}
+
+# github_release_asset <repo> <префикс имени> <ext>
+# Ищет в последнем релизе ссылку на файл вида <префикс>...<ext>
+github_release_asset() {
+    _json=$(http_get "https://api.github.com/repos/$1/releases/latest")
+    [ -z "$_json" ] && return 1
+    echo "$_json" | tr ',' '\n' | grep 'browser_download_url' \
+        | grep -F "$2" | grep -F ".$3" | head -n 1 | cut -d'"' -f4
+}
+
+# install_github_pkg <repo> <имя-пакета> <резервная-версия>
+install_github_pkg() {
+    _repo="$1"
+    _pkg="$2"
+    _fallback="$3"
+
+    if [ "$PKG_MGR" = "apk" ]; then
+        _ext="apk"
+    else
+        _ext="ipk"
+    fi
+    _file="/tmp/$_pkg.$_ext"
+
+    echo -e "${BLUE}>>> Ищу последнюю версию $_pkg в $_repo...${NC}"
+    _url=$(github_release_asset "$_repo" "$_pkg" "$_ext")
+
+    if [ -z "$_url" ]; then
+        echo -e "${YELLOW}GitHub API недоступен, использую версию $_fallback${NC}"
+        if [ "$_ext" = "apk" ]; then
+            _url="https://github.com/$_repo/releases/download/v$_fallback/$_pkg-$_fallback.apk"
+        else
+            _url="https://github.com/$_repo/releases/download/v$_fallback/${_pkg}_${_fallback}_all.ipk"
+        fi
+    fi
+
+    # Для apk нужен публичный ключ подписи пакета
+    if [ "$_ext" = "apk" ] && [ ! -f "/etc/apk/keys/$_pkg.rsa.pub" ]; then
+        _key_url=$(github_release_asset "$_repo" "$_pkg.rsa.pub" "pub")
+        [ -z "$_key_url" ] && _key_url="https://github.com/$_repo/releases/download/v$_fallback/$_pkg.rsa.pub"
+        mkdir -p /etc/apk/keys
+        fetch_file "$_key_url" "/etc/apk/keys/$_pkg.rsa.pub" 2>/dev/null || \
+            echo -e "${YELLOW}Не удалось скачать ключ подписи, установка пойдёт с --allow-untrusted${NC}"
+    fi
+
+    echo -e "${GREEN}>>> Скачиваю: $_url${NC}"
+    fetch_file "$_url" "$_file" || { echo -e "${RED}Ошибка скачивания $_pkg${NC}"; return 1; }
+
+    echo -e "${GREEN}>>> Устанавливаю: $_pkg${NC}"
+    if [ "$PKG_MGR" = "apk" ]; then
+        apk add $ALLOW_UNTRUSTED "$_file" || {
+            echo -e "${RED}Ошибка установки $_pkg${NC}"
+            rm -f "$_file"
+            return 1
+        }
+    else
+        opkg install "$_file" || opkg install --force-depends "$_file" || {
+            echo -e "${RED}Ошибка установки $_pkg${NC}"
+            rm -f "$_file"
+            return 1
+        }
+    fi
+    rm -f "$_file"
+    return 0
 }
 
 apply_dnsproxy_config() {
@@ -228,23 +315,18 @@ EOF
 }
 
 install_dnsproxy() {
-    echo -e "${GREEN}>>> Скачиваю luci-app-dnsproxy...${NC}"
-    if command -v wget >/dev/null 2>&1; then
-        wget -O "$DNSPROXY_FILE" "$DNSPROXY_URL" || { echo -e "${RED}Ошибка скачивания${NC}"; return 1; }
-    elif command -v curl >/dev/null 2>&1; then
-        curl -L -o "$DNSPROXY_FILE" "$DNSPROXY_URL" || { echo -e "${RED}Ошибка скачивания${NC}"; return 1; }
-    else
-        echo -e "${RED}Нет wget и curl${NC}"
-        return 1
-    fi
+    echo -e "${GREEN}>>> Устанавливаю демон dnsproxy из репозитория $PKG_MGR...${NC}"
+    $INSTALL_CMD $ALLOW_UNTRUSTED dnsproxy 2>/dev/null || \
+        echo -e "${YELLOW}Пакет dnsproxy не установлен через $PKG_MGR (возможно, уже присутствует)${NC}"
 
-    echo -e "${GREEN}>>> Устанавливаю luci-app-dnsproxy...${NC}"
-    if [ "$PKG_MGR" = "apk" ]; then
-        apk add $ALLOW_UNTRUSTED "$DNSPROXY_FILE" || echo -e "${RED}Ошибка установки${NC}"
-    else
-        opkg install $ALLOW_UNTRUSTED "$DNSPROXY_FILE" || echo -e "${RED}Ошибка установки${NC}"
-    fi
-    rm -f "$DNSPROXY_FILE"
+    echo -e "${GREEN}>>> Устанавливаю мой интерфейс: $DNSPROXY_REPO...${NC}"
+    install_github_pkg "$DNSPROXY_REPO" "$DNSPROXY_PKG_NAME" "$DNSPROXY_FALLBACK_VER" || {
+        echo -e "${RED}Не удалось установить luci-app-dnsproxy${NC}"
+        return 1
+    }
+
+    /etc/init.d/rpcd restart 2>/dev/null
+    rm -rf /tmp/luci-indexcache* 2>/dev/null
 
     apply_dnsproxy_config
 }
@@ -359,6 +441,33 @@ install_theme() {
     }
 
     echo -e "${GREEN}>>> Тема и локализация обработаны${NC}"
+}
+
+install_koka_theme() {
+    echo -e "${GREEN}>>> Устанавливаю мою тему Koka Modern...${NC}"
+
+    # Koka — скин поверх движка luci-theme-footstrap
+    if ! $INSTALL_CMD $ALLOW_UNTRUSTED luci-theme-footstrap >/dev/null 2>&1; then
+        if [ ! -f /www/luci-static/footstrap/cascade.css ]; then
+            echo -e "${BLUE}>>> Движок footstrap не найден, сначала ставлю его...${NC}"
+            install_theme
+        fi
+    fi
+
+    install_github_pkg "$KOKA_REPO" "$KOKA_PKG_NAME" "$KOKA_FALLBACK_VER" || {
+        echo -e "${RED}Не удалось установить тему Koka${NC}"
+        return 1
+    }
+
+    # Пакет сам применяет скин и дашборд, но тему в LuCI включаем на всякий случай
+    uci set luci.main.mediaurlbase='/luci-static/footstrap' 2>/dev/null
+    uci commit luci 2>/dev/null
+
+    /etc/init.d/rpcd restart 2>/dev/null
+    rm -rf /tmp/luci-indexcache* 2>/dev/null
+
+    echo -e "${GREEN}>>> Тема Koka установлена. Обновите страницу LuCI (F5)${NC}"
+    echo -e "${CYAN}>>> Выбрать тему: Система -> Дизайн -> Koka${NC}"
 }
 
 install_zerotier() {
@@ -478,6 +587,7 @@ if [ "$choice" = "0" ]; then
     install_splify
     install_internet_detector
     install_theme
+    install_koka_theme
     install_zerotier
     fix_apk_luci
     disable_ipv6
@@ -512,6 +622,10 @@ else
         fi
         if [ "$num" -eq "$THEME_NUM" ]; then
             install_theme
+            continue
+        fi
+        if [ "$num" -eq "$KOKA_NUM" ]; then
+            install_koka_theme
             continue
         fi
         if [ "$num" -eq "$ZEROTIER_NUM" ]; then
