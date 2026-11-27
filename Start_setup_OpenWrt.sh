@@ -105,7 +105,7 @@ DNSPROXY_PKG="luci-app-dnsproxy"
 DNSPROXY_FALLBACK="2026.11.27-r4"
 KOKA_REPO="$GH_USER/luci-theme-koka"
 KOKA_PKG="luci-theme-koka"
-KOKA_FALLBACK="2026.11.27-r19"
+KOKA_FALLBACK="2026.11.27-r20"
 
 # ---------- Загрузчик ----------
 DOWNLOADER=""
@@ -448,35 +448,21 @@ install_internet_detector() {
     fi
 }
 
-# Тема Koka ставится поверх движка footstrap: ставим движок только при необходимости
-ensure_footstrap() {
-    [ -f /www/luci-static/footstrap/cascade.css ] && return 0
-    info "Ставлю движок footstrap, нужный теме Koka"
-    if $INSTALL_CMD $ALLOW_UNTRUSTED luci-theme-footstrap >/tmp/setup-install.log 2>&1; then
-        return 0
-    fi
-    _tmp=/tmp/footstrap-install.sh
-    if fetch_file "https://raw.githubusercontent.com/VizzleTF/luci-theme-footstrap/main/install.sh" "$_tmp" >/dev/null 2>&1; then
-        sh "$_tmp" >>/tmp/setup-install.log 2>&1
-    fi
-    rm -f "$_tmp"
-    [ -f /www/luci-static/footstrap/cascade.css ]
-}
-
 install_koka_theme() {
     step "Тема Koka Modern"
-    ensure_footstrap || warn "Движок footstrap не удалось поставить — тема может не заработать"
     install_github_pkg "$KOKA_REPO" "$KOKA_PKG" "$KOKA_FALLBACK" || return 1
 
+    # Пакет сам регистрирует и включает тему; подстрахуемся, если LuCI не обновился
     if uci -q get luci.main >/dev/null 2>&1; then
-        uci set luci.main.mediaurlbase='/luci-static/footstrap'
+        uci -q get luci.themes.Koka >/dev/null 2>&1 || \
+            uci set luci.themes.Koka='/luci-static/koka'
+        uci set luci.main.mediaurlbase='/luci-static/koka'
         uci commit luci
     fi
     /etc/init.d/rpcd restart 2>/dev/null
     rm -rf /tmp/luci-indexcache* 2>/dev/null
 
-    ok "Тема Koka активна — обнови страницу LuCI (F5)"
-    info "Выбрать тему можно в: Система -> Дизайн -> Koka"
+    ok "Тема Koka установлена и включена — обнови страницу LuCI (F5)"
 }
 
 ask_zerotier_id() {

@@ -33,9 +33,9 @@ sh Start_setup_OpenWrt.sh --help     # справка
 подписи для apk), при недоступности API используется закреплённая версия.
 
 - **luci-theme-koka** — [luci-theme-koka](https://github.com/moseszz007/luci-theme-koka):
-  тема Koka Modern (скин + дашборд). Отдельный пункт меню и установка в режиме
-  «Установить всё». Сам движок `luci-theme-footstrap` отдельным пунктом больше
-  не ставится — он подтягивается автоматически только как база для Koka.
+  самостоятельная тема Koka Modern (свой движок, дашборд и иконки).
+  `luci-theme-footstrap` не нужен и не устанавливается. Отдельный пункт меню
+  и установка в режиме «Установить всё».
 - **luci-app-dnsproxy** — [luci-app-dnsproxy](https://github.com/moseszz007/luci-app-dnsproxy):
   мой UI вместо сторонней сборки, вместе с демоном `dnsproxy` и готовым конфигом
   (dnsmasq переключается на `127.0.0.1#5353`).
