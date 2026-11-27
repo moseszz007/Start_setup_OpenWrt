@@ -1,233 +1,253 @@
 #!/bin/sh
+# ============================================================
+#  Start_setup_OpenWrt 2.0
+#  Установщик пакетов и утилит для OpenWrt
+#  https://github.com/moseszz007/Start_setup_OpenWrt
+#
+#  Использование:
+#    sh Start_setup_OpenWrt.sh          # интерактивное меню
+#    sh Start_setup_OpenWrt.sh 1 4 9    # сразу выбранные пункты
+#    sh Start_setup_OpenWrt.sh 2-5      # диапазон пунктов
+#    sh Start_setup_OpenWrt.sh --all    # установить всё
+# ============================================================
 
-# ============================================
-# Установщик пакетов и утилит для OpenWrt
-# ============================================
+APP_VER="2.0"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-# Глобальная переменная для Network ID ZeroTier
-ZEROTIER_NET_ID=""
-
-# ---------- Определение пакетного менеджера ----------
-if command -v apk >/dev/null 2>&1; then
-    PKG_MGR="apk"
-    UPDATE_CMD="apk update"
-    INSTALL_CMD="apk add"
-    ALLOW_UNTRUSTED="--allow-untrusted"
-elif command -v opkg >/dev/null 2>&1; then
-    PKG_MGR="opkg"
-    UPDATE_CMD="opkg update"
-    INSTALL_CMD="opkg install"
-    ALLOW_UNTRUSTED=""
+# ---------- Цвета (только в терминале) ----------
+if [ -t 1 ]; then
+    C_RED='\033[0;31m'
+    C_GRN='\033[0;32m'
+    C_YEL='\033[1;33m'
+    C_BLU='\033[0;34m'
+    C_CYN='\033[0;36m'
+    C_DIM='\033[2m'
+    C_BLD='\033[1m'
+    C_RST='\033[0m'
 else
-    echo -e "${RED}Ошибка: ни opkg, ни apk не найдены!${NC}"
+    C_RED=''; C_GRN=''; C_YEL=''; C_BLU=''; C_CYN=''; C_DIM=''; C_BLD=''; C_RST=''
+fi
+
+# ---------- Единый вывод ----------
+info() { printf '%b  ... %s%b\n' "$C_CYN" "$1" "$C_RST"; }
+ok()   { printf '%b  [ok] %s%b\n' "$C_GRN" "$1" "$C_RST"; }
+warn() { printf '%b  [!]  %s%b\n' "$C_YEL" "$1" "$C_RST"; }
+err()  { printf '%b  [x]  %s%b\n' "$C_RED" "$1" "$C_RST"; }
+step() { printf '\n%b>>> %s%b\n' "$C_BLD$C_BLU" "$1" "$C_RST"; }
+line() { printf '%b%s%b\n' "$C_DIM" "------------------------------------------------------------" "$C_RST"; }
+
+# ---------- Итоги ----------
+SUM_OK=0
+SUM_FAIL=0
+SUM_LINES=""
+
+add_result() {
+    if [ "$1" = "ok" ]; then
+        SUM_OK=$((SUM_OK + 1))
+        SUM_LINES="${SUM_LINES}\n ${C_GRN}[ok]${C_RST}  $2"
+    else
+        SUM_FAIL=$((SUM_FAIL + 1))
+        SUM_LINES="${SUM_LINES}\n ${C_RED}[x]${C_RST}   $2"
+    fi
+}
+
+# ---------- Пакетный менеджер ----------
+if command -v apk >/dev/null 2>&1; then
+    PKG_MGR="apk"; UPDATE_CMD="apk update"; INSTALL_CMD="apk add"; ALLOW_UNTRUSTED="--allow-untrusted"
+elif command -v opkg >/dev/null 2>&1; then
+    PKG_MGR="opkg"; UPDATE_CMD="opkg update"; INSTALL_CMD="opkg install"; ALLOW_UNTRUSTED=""
+else
+    printf '%bОшибка: ни opkg, ни apk не найдены%b\n' "$C_RED" "$C_RST"
     exit 1
 fi
 
-# ---------- Определение версии OpenWrt ----------
-RELEASE="24.10"
+# ---------- Прошивка ----------
+RELEASE="unknown"; ARCH="unknown"
 if [ -f /etc/openwrt_release ]; then
     . /etc/openwrt_release
-    case "$DISTRIB_RELEASE" in
-        25.*) RELEASE="25.12" ;;
-        24.*) RELEASE="24.10" ;;
-    esac
+    [ -n "$DISTRIB_RELEASE" ] && RELEASE="$DISTRIB_RELEASE"
+    [ -n "$DISTRIB_ARCH" ] && ARCH="$DISTRIB_ARCH"
 fi
 
-# ---------- Обычные пакеты ----------
+# ---------- Базовые пакеты ----------
 PACKAGES="
 nano|Текстовый редактор nano
 unzip|Распаковка ZIP-архивов
-ttyd|Веб-терминал (ttyd)
-luci-i18n-base-ru|Русский язык для LuCI (базовый)
+ttyd|Веб-терминал
 luci-app-ttyd|LuCI-приложение для ttyd
-luci-i18n-ttyd-ru|Русский язык для luci-app-ttyd
+luci-i18n-ttyd-ru|Русский язык для ttyd
 luci-app-filemanager|Файловый менеджер в LuCI
 luci-i18n-filemanager-ru|Русский язык для файлового менеджера
+luci-i18n-base-ru|Русский язык для LuCI
 "
 
-# ---------- Собственные пакеты автора (GitHub Releases) ----------
+# ---------- Компоненты: key|описание|пакет для статуса ----------
+FEATURES="
+dnsproxy|DNS Proxy: мой UI + готовый конфиг|luci-app-dnsproxy
+dnsproxy-config|Только применить готовый конфиг|
+zapret|Zapret Manager: обход блокировок|
+splify|Splify2: маршрутизация трафика|
+internet-detector|Детектор интернета + русификатор|luci-app-internet-detector
+luci-theme-koka|Моя тема: скин и дашборд|luci-theme-koka
+zerotier|VPN-доступ к роутеру|zerotier
+fix-apk|Фикс установки локальных пакетов в LuCI|
+ipv6-off|Полное отключение IPv6|
+"
+
+BASE_COUNT=$(printf '%s\n' "$PACKAGES" | grep -c '|')
+FEAT_COUNT=$(printf '%s\n' "$FEATURES" | grep -c '|')
+FEAT_START=$((BASE_COUNT + 1))
+MAX_NUM=$((BASE_COUNT + FEAT_COUNT))
+
+# ---------- Мои репозитории ----------
 GH_USER="moseszz007"
-
 DNSPROXY_REPO="$GH_USER/luci-app-dnsproxy"
-DNSPROXY_PKG_NAME="luci-app-dnsproxy"
-DNSPROXY_FALLBACK_VER="2026.11.27-r4"
-
+DNSPROXY_PKG="luci-app-dnsproxy"
+DNSPROXY_FALLBACK="2026.11.27-r4"
 KOKA_REPO="$GH_USER/luci-theme-koka"
-KOKA_PKG_NAME="luci-theme-koka"
-KOKA_FALLBACK_VER="2026.11.27-r19"
+KOKA_PKG="luci-theme-koka"
+KOKA_FALLBACK="2026.11.27-r19"
 
-clear
-echo -e "${BLUE}==================================================${NC}"
-echo -e "${BLUE}        Менеджер установки пакетов OpenWrt        ${NC}"
-echo -e "${CYAN}        Менеджер: $PKG_MGR  |  Версия: $RELEASE          ${NC}"
-echo -e "${BLUE}==================================================${NC}"
-echo ""
-
-# Автоматический подсчет номеров пунктов меню
-TOTAL_PACKAGES_COUNT=0
-for pkg in $(echo "$PACKAGES" | awk -F'|' 'NF>1 {print $1}'); do
-    TOTAL_PACKAGES_COUNT=$((TOTAL_PACKAGES_COUNT + 1))
-done
-
-DNSPROXY_NUM=$((TOTAL_PACKAGES_COUNT + 1))
-CFG_DNSPROXY_NUM=$((TOTAL_PACKAGES_COUNT + 2))
-ZAPRET_NUM=$((TOTAL_PACKAGES_COUNT + 3))
-SPLIFY_NUM=$((TOTAL_PACKAGES_COUNT + 4))
-INETDET_NUM=$((TOTAL_PACKAGES_COUNT + 5))
-THEME_NUM=$((TOTAL_PACKAGES_COUNT + 6))
-KOKA_NUM=$((TOTAL_PACKAGES_COUNT + 7))
-ZEROTIER_NUM=$((TOTAL_PACKAGES_COUNT + 8))
-FIXAPK_NUM=$((TOTAL_PACKAGES_COUNT + 9))
-IPV6_NUM=$((TOTAL_PACKAGES_COUNT + 10))
-
-# Отрисовка меню
-echo -e "${CYAN}--- Базовые пакеты и локализация ---${NC}"
-i=1
-echo "$PACKAGES" | while IFS='|' read -r pkg desc; do
-    [ -z "$pkg" ] && continue
-    printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$i" "$pkg" "$desc"
-    i=$((i + 1))
-done
-
-echo ""
-echo -e "${CYAN}--- Дополнительные компоненты ---${NC}"
-printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$DNSPROXY_NUM" "luci-app-dnsproxy" "DNS Proxy с готовым конфигом"
-printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$CFG_DNSPROXY_NUM" "Конфиг dnsproxy (только)" "Применить готовый конфиг DNS Proxy"
-printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$ZAPRET_NUM" "Zapret Manager" "Управление обходом блокировок"
-printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$SPLIFY_NUM" "Splify2" "Инструмент маршрутизации трафика"
-printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$INETDET_NUM" "Internet Detector" "Детектор подключения с русификатором"
-printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$THEME_NUM" "LuCI Theme Footstrap" "Установка современной темы оформления"
-printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$KOKA_NUM" "LuCI Theme Koka" "Моя тема Koka Modern (скин + дашборд)"
-printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$ZEROTIER_NUM" "ZeroTier" "VPN-сеть для доступа к роутеру"
-
-echo ""
-echo -e "${CYAN}--- Система и сеть ---${NC}"
-printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$FIXAPK_NUM" "Фикс APK в LuCI" "Разрешить установку локальных пакетов"
-printf " ${YELLOW}%2d${NC}) %-28s — %s\n" "$IPV6_NUM" "Отключение IPv6" "Полное отключение протокола IPv6"
-
-echo ""
-echo -e "${BLUE}--------------------------------------------------${NC}"
-echo -e " ${GREEN} 0${NC}) Установить абсолютно ВСЕ компоненты"
-echo -e " ${RED} q${NC}) Выход"
-echo -e "${BLUE}--------------------------------------------------${NC}"
-echo ""
-
-printf "Введите номер пункта (или несколько через пробел): "
-read -r choice
-
-case "$choice" in
-    q|Q|exit) echo "Выход."; exit 0 ;;
-esac
-
-# ---------- Обновление (только если нужно) ----------
-if [ "$choice" != "$CFG_DNSPROXY_NUM" ]; then
-    echo ""
-    echo -e "${BLUE}>>> Обновление списка пакетов ($PKG_MGR)...${NC}"
-    $UPDATE_CMD || {
-        echo -e "${RED}Ошибка обновления списков пакетов!${NC}"
-        exit 1
-    }
-fi
-
-# ---------- Функции установки ----------
-install_pkg() {
-    echo -e "${GREEN}>>> Устанавливаю: $1${NC}"
-    $INSTALL_CMD "$1" || echo -e "${RED}Не удалось установить $1${NC}"
+# ---------- Загрузчик ----------
+DOWNLOADER=""
+detect_downloader() {
+    if command -v uclient-fetch >/dev/null 2>&1; then DOWNLOADER="uclient-fetch"
+    elif command -v wget >/dev/null 2>&1; then DOWNLOADER="wget"
+    elif command -v curl >/dev/null 2>&1; then DOWNLOADER="curl"
+    else DOWNLOADER=""
+    fi
 }
 
-# ---------- Скачивание с GitHub Releases ----------
+ensure_downloader() {
+    detect_downloader
+    [ -n "$DOWNLOADER" ] && return 0
+    info "Ставлю инструмент загрузки"
+    $INSTALL_CMD ca-bundle >/dev/null 2>&1
+    $INSTALL_CMD libustream-mbedtls >/dev/null 2>&1
+    $INSTALL_CMD wget-ssl >/dev/null 2>&1 || $INSTALL_CMD curl >/dev/null 2>&1
+    detect_downloader
+    [ -n "$DOWNLOADER" ]
+}
+
 http_get() {
-    if command -v wget >/dev/null 2>&1; then
-        wget -qO- --header="User-Agent: Mozilla/5.0" "$1" 2>/dev/null
-    elif command -v curl >/dev/null 2>&1; then
-        curl -fsSL -A "Mozilla/5.0" "$1" 2>/dev/null
-    fi
+    case "$DOWNLOADER" in
+        uclient-fetch) uclient-fetch -q -T 25 --header="User-Agent: Start_setup_OpenWrt" -O - "$1" 2>/dev/null ;;
+        wget)          wget -q -T 25 --header="User-Agent: Start_setup_OpenWrt" -O - "$1" 2>/dev/null ;;
+        curl)          curl -fsSL --max-time 25 -A "Start_setup_OpenWrt" "$1" 2>/dev/null ;;
+    esac
 }
 
 fetch_file() {
-    if command -v wget >/dev/null 2>&1; then
-        wget -q --no-check-certificate -O "$2" "$1"
-    elif command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o "$2" "$1"
-    else
-        echo -e "${RED}Нет wget и curl${NC}"
-        return 1
-    fi
+    case "$DOWNLOADER" in
+        uclient-fetch) uclient-fetch -q -T 90 -O "$2" "$1" ;;
+        wget)          wget -q -T 90 -O "$2" "$1" ;;
+        curl)          curl -fsSL --max-time 90 -o "$2" "$1" ;;
+        *)             return 1 ;;
+    esac
 }
 
-# github_release_asset <repo> <префикс имени> <ext>
-# Ищет в последнем релизе ссылку на файл вида <префикс>...<ext>
-github_release_asset() {
+# github_asset <repo> <префикс имени> <ext> — ссылка на файл из последнего релиза
+github_asset() {
     _json=$(http_get "https://api.github.com/repos/$1/releases/latest")
     [ -z "$_json" ] && return 1
-    echo "$_json" | tr ',' '\n' | grep 'browser_download_url' \
+    printf '%s' "$_json" | tr ',' '\n' | grep 'browser_download_url' \
         | grep -F "$2" | grep -F ".$3" | head -n 1 | cut -d'"' -f4
 }
 
-# install_github_pkg <repo> <имя-пакета> <резервная-версия>
-install_github_pkg() {
-    _repo="$1"
-    _pkg="$2"
-    _fallback="$3"
-
+# ---------- Статус установленных пакетов ----------
+INSTALLED=""
+load_installed() {
     if [ "$PKG_MGR" = "apk" ]; then
-        _ext="apk"
+        INSTALLED=$(apk info 2>/dev/null)
     else
-        _ext="ipk"
+        INSTALLED=$(opkg list-installed 2>/dev/null | awk '{print $1}')
     fi
+}
+
+is_installed() {
+    [ -n "$INSTALLED" ] || return 1
+    printf '%s\n' "$INSTALLED" | grep -qx "$1"
+}
+
+# ---------- Установка одного пакета ----------
+install_pkg() {
+    if is_installed "$1"; then
+        ok "$1 уже установлен"
+        add_result ok "$1"
+        return 0
+    fi
+    info "Ставлю $1"
+    if $INSTALL_CMD "$1" >/tmp/setup-install.log 2>&1; then
+        ok "$1 установлен"
+        add_result ok "$1"
+    else
+        err "Не удалось установить $1"
+        tail -n 3 /tmp/setup-install.log 2>/dev/null | sed 's/^/       /'
+        add_result fail "$1"
+    fi
+}
+
+# ---------- Установка пакета с GitHub Releases ----------
+install_github_pkg() {
+    _repo="$1"; _pkg="$2"; _fb="$3"
+
+    ensure_downloader || { err "Нет wget/curl"; add_result fail "$_pkg"; return 1; }
+
+    if [ "$PKG_MGR" = "apk" ]; then _ext="apk"; else _ext="ipk"; fi
     _file="/tmp/$_pkg.$_ext"
 
-    echo -e "${BLUE}>>> Ищу последнюю версию $_pkg в $_repo...${NC}"
-    _url=$(github_release_asset "$_repo" "$_pkg" "$_ext")
-
+    info "Ищу последний релиз $_pkg"
+    _url=$(github_asset "$_repo" "$_pkg" "$_ext")
     if [ -z "$_url" ]; then
-        echo -e "${YELLOW}GitHub API недоступен, использую версию $_fallback${NC}"
+        warn "GitHub API недоступен — беру версию $_fb"
         if [ "$_ext" = "apk" ]; then
-            _url="https://github.com/$_repo/releases/download/v$_fallback/$_pkg-$_fallback.apk"
+            _url="https://github.com/$_repo/releases/download/v$_fb/$_pkg-$_fb.apk"
         else
-            _url="https://github.com/$_repo/releases/download/v$_fallback/${_pkg}_${_fallback}_all.ipk"
+            _url="https://github.com/$_repo/releases/download/v$_fb/${_pkg}_${_fb}_all.ipk"
         fi
     fi
 
-    # Для apk нужен публичный ключ подписи пакета
-    if [ "$_ext" = "apk" ] && [ ! -f "/etc/apk/keys/$_pkg.rsa.pub" ]; then
-        _key_url=$(github_release_asset "$_repo" "$_pkg.rsa.pub" "pub")
-        [ -z "$_key_url" ] && _key_url="https://github.com/$_repo/releases/download/v$_fallback/$_pkg.rsa.pub"
+    # для apk нужен ключ подписи пакета
+    if [ "$_ext" = "apk" ] && [ ! -s "/etc/apk/keys/$_pkg.rsa.pub" ]; then
+        _key=$(github_asset "$_repo" "$_pkg.rsa.pub" pub)
+        [ -z "$_key" ] && _key="https://github.com/$_repo/releases/download/v$_fb/$_pkg.rsa.pub"
         mkdir -p /etc/apk/keys
-        fetch_file "$_key_url" "/etc/apk/keys/$_pkg.rsa.pub" 2>/dev/null || \
-            echo -e "${YELLOW}Не удалось скачать ключ подписи, установка пойдёт с --allow-untrusted${NC}"
+        fetch_file "$_key" "/etc/apk/keys/$_pkg.rsa.pub" >/dev/null 2>&1 || \
+            warn "Ключ подписи не скачан"
     fi
 
-    echo -e "${GREEN}>>> Скачиваю: $_url${NC}"
-    fetch_file "$_url" "$_file" || { echo -e "${RED}Ошибка скачивания $_pkg${NC}"; return 1; }
+    info "Скачиваю $(basename "$_url")"
+    if ! fetch_file "$_url" "$_file"; then
+        err "Ошибка скачивания $_pkg"
+        rm -f "$_file"
+        add_result fail "$_pkg"
+        return 1
+    fi
 
-    echo -e "${GREEN}>>> Устанавливаю: $_pkg${NC}"
+    _done=0
     if [ "$PKG_MGR" = "apk" ]; then
-        apk add $ALLOW_UNTRUSTED "$_file" || {
-            echo -e "${RED}Ошибка установки $_pkg${NC}"
-            rm -f "$_file"
-            return 1
-        }
+        apk add $ALLOW_UNTRUSTED "$_file" >/tmp/setup-install.log 2>&1 && _done=1
     else
-        opkg install "$_file" || opkg install --force-depends "$_file" || {
-            echo -e "${RED}Ошибка установки $_pkg${NC}"
-            rm -f "$_file"
-            return 1
-        }
+        opkg install "$_file" >/tmp/setup-install.log 2>&1 && _done=1
+        if [ "$_done" = "0" ]; then
+            opkg install --force-depends "$_file" >/tmp/setup-install.log 2>&1 && _done=1
+        fi
     fi
     rm -f "$_file"
-    return 0
+
+    if [ "$_done" = "1" ]; then
+        ok "$_pkg установлен"
+        add_result ok "$_pkg"
+        return 0
+    fi
+    err "Не удалось установить $_pkg"
+    tail -n 3 /tmp/setup-install.log 2>/dev/null | sed 's/^/       /'
+    add_result fail "$_pkg"
+    return 1
 }
 
+# ---------- Конфиг dnsproxy ----------
 apply_dnsproxy_config() {
-    echo -e "${GREEN}>>> Применяю конфигурацию dnsproxy...${NC}"
+    info "Применяю конфигурацию dnsproxy"
     cat > /etc/config/dnsproxy << 'EOF'
 config dnsproxy 'global'
 	option ipv6_disabled '1'
@@ -301,358 +321,485 @@ config profile
 	list upstream 'https://de-dus.doh.sb/dns-query	'
 	list upstream 'https://nl-ams.doh.sb/dns-query'
 EOF
-
-    echo -e "${GREEN}>>> Настраиваю dnsmasq (127.0.0.1#5353)...${NC}"
     uci set dhcp.@dnsmasq[0].noresolv='1'
     uci -q delete dhcp.@dnsmasq[0].server
     uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#5353'
     uci commit dhcp
 
-    /etc/init.d/dnsproxy enable 2>/dev/null
-    /etc/init.d/dnsproxy restart 2>/dev/null
-    /etc/init.d/dnsmasq restart
-    echo -e "${GREEN}>>> Конфигурация dnsproxy успешно применена${NC}"
+    if [ -x /etc/init.d/dnsproxy ]; then
+        /etc/init.d/dnsproxy enable 2>/dev/null
+        /etc/init.d/dnsproxy restart 2>/dev/null
+    fi
+    if [ -x /etc/init.d/dnsmasq ]; then
+        /etc/init.d/dnsmasq restart 2>/dev/null
+    fi
+
+    ok "Конфиг dnsproxy применён (127.0.0.1:5353)"
+    add_result ok "Конфиг dnsproxy"
 }
 
 install_dnsproxy() {
-    echo -e "${GREEN}>>> Устанавливаю демон dnsproxy из репозитория $PKG_MGR...${NC}"
-    $INSTALL_CMD $ALLOW_UNTRUSTED dnsproxy 2>/dev/null || \
-        echo -e "${YELLOW}Пакет dnsproxy не установлен через $PKG_MGR (возможно, уже присутствует)${NC}"
-
-    echo -e "${GREEN}>>> Устанавливаю мой интерфейс: $DNSPROXY_REPO...${NC}"
-    install_github_pkg "$DNSPROXY_REPO" "$DNSPROXY_PKG_NAME" "$DNSPROXY_FALLBACK_VER" || {
-        echo -e "${RED}Не удалось установить luci-app-dnsproxy${NC}"
-        return 1
-    }
-
+    step "DNS Proxy"
+    install_pkg dnsproxy
+    install_github_pkg "$DNSPROXY_REPO" "$DNSPROXY_PKG" "$DNSPROXY_FALLBACK"
     /etc/init.d/rpcd restart 2>/dev/null
     rm -rf /tmp/luci-indexcache* 2>/dev/null
-
     apply_dnsproxy_config
 }
 
 install_zapret() {
-    echo -e "${GREEN}>>> Устанавливаю Zapret Manager...${NC}"
-    if ! command -v wget >/dev/null 2>&1; then
-        $INSTALL_CMD wget || return 1
+    step "Zapret Manager"
+    ensure_downloader || { err "Нет wget/curl"; add_result fail "Zapret Manager"; return 1; }
+    _tmp=/tmp/zapret-install.sh
+    info "Скачиваю установщик"
+    if fetch_file "https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh" "$_tmp" \
+        && sh "$_tmp"; then
+        ok "Zapret Manager установлен"
+        add_result ok "Zapret Manager"
+    else
+        err "Ошибка установки Zapret Manager"
+        add_result fail "Zapret Manager"
     fi
-    sh <(wget -qO - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh) || {
-        echo -e "${RED}Ошибка установки Zapret Manager${NC}"
-        return 1
-    }
-    echo -e "${GREEN}>>> Zapret Manager установлен${NC}"
+    rm -f "$_tmp"
 }
 
 install_splify() {
-    echo -e "${GREEN}>>> Устанавливаю Splify2...${NC}"
-    if ! command -v wget >/dev/null 2>&1; then
-        $INSTALL_CMD wget || return 1
+    step "Splify2"
+    ensure_downloader || { err "Нет wget/curl"; add_result fail "Splify2"; return 1; }
+    _tmp=/tmp/splify-install.sh
+    info "Скачиваю установщик"
+    if fetch_file "https://gitlab.com/xyzmean/splify2/-/raw/main/install.sh" "$_tmp" \
+        && sh "$_tmp"; then
+        ok "Splify2 установлен"
+        add_result ok "Splify2"
+    else
+        err "Ошибка установки Splify2"
+        add_result fail "Splify2"
     fi
-    sh -c "$(wget -qO- https://gitlab.com/xyzmean/splify2/-/raw/main/install.sh)" || {
-        echo -e "${RED}Ошибка установки Splify2${NC}"
-        return 1
-    }
-    echo -e "${GREEN}>>> Splify2 установлен${NC}"
+    rm -f "$_tmp"
+}
+
+# Выбрать имя файла из JSON-листинга GitHub: <json> <вхождение> [исключить]
+_pick_asset() {
+    if [ -n "$3" ]; then
+        printf '%s' "$1" | tr ',' '\n' | grep '"name"' | grep -F "$2" \
+            | grep -v -F "$3" | head -n 1 | cut -d'"' -f4
+    else
+        printf '%s' "$1" | tr ',' '\n' | grep '"name"' | grep -F "$2" \
+            | head -n 1 | cut -d'"' -f4
+    fi
 }
 
 install_internet_detector() {
-    echo -e "${GREEN}>>> Устанавливаю Internet Detector (авто-определение версии)...${NC}"
-    if ! command -v wget >/dev/null 2>&1; then
-        $INSTALL_CMD wget || return 1
-    fi
+    step "Internet Detector"
+    ensure_downloader || { err "Нет wget/curl"; add_result fail "Internet Detector"; return 1; }
 
-    if [ "$RELEASE" = "25.12" ] || [ "$PKG_MGR" = "apk" ]; then
-        BRANCH="25.12"
-        EXT="apk"
+    if [ "$PKG_MGR" = "apk" ]; then
+        _branch="25.12"; _ext="apk"
     else
-        BRANCH="24.10"
-        EXT="ipk"
+        _branch="24.10"; _ext="ipk"
     fi
 
-    echo -e "${BLUE}>>> Сканирую репозиторий GitHub ($BRANCH)...${NC}"
-    WEB_URL="https://github.com/gSpotx2f/packages-openwrt/tree/master/$BRANCH"
-    
-    HTML_CONTENT=$(wget -qO- --header="User-Agent: Mozilla/5.0" "$WEB_URL")
+    info "Смотрю последние сборки ($_branch)"
+    _list=$(http_get "https://api.github.com/repos/gSpotx2f/packages-openwrt/contents/$_branch")
+    _core=$(_pick_asset "$_list" "internet-detector" "luci-")
+    _luci=$(_pick_asset "$_list" "luci-app-internet-detector")
+    _ru=$(_pick_asset "$_list" "luci-i18n-internet-detector-ru")
 
-    if [ "$EXT" = "apk" ]; then
-        FILE_CORE=$(echo "$HTML_CONTENT" | grep -oE "internet-detector-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
-        FILE_LUCI=$(echo "$HTML_CONTENT" | grep -oE "luci-app-internet-detector-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
-        FILE_RU=$(echo "$HTML_CONTENT" | grep -oE "luci-i18n-internet-detector-ru-[0-9\.-]+-r[0-9]+\.apk" | head -n 1)
-    else
-        FILE_CORE=$(echo "$HTML_CONTENT" | grep -oE "internet-detector_[0-9\.-]_[a-z0-9_]+\.ipk" | head -n 1)
-        [ -z "$FILE_CORE" ] && FILE_CORE=$(echo "$HTML_CONTENT" | grep -oE "internet-detector_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
-        
-        FILE_LUCI=$(echo "$HTML_CONTENT" | grep -oE "luci-app-internet-detector_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
-        FILE_RU=$(echo "$HTML_CONTENT" | grep -oE "luci-i18n-internet-detector-ru_[0-9\.-]+_[a-zA-Z0-9_-]+\.ipk" | head -n 1)
-    fi
-
-    if [ -z "$FILE_CORE" ]; then
-        echo -e "${YELLOW}Не удалось автоматически найти имена через веб-страницу, используем r2 по умолчанию...${NC}"
-        if [ "$EXT" = "apk" ]; then
-            FILE_CORE="internet-detector-1.7.4-r2.apk"
-            FILE_LUCI="luci-app-internet-detector-1.7.4-r2.apk"
-            FILE_RU="luci-i18n-internet-detector-ru-1.7.4-r2.apk"
+    if [ -z "$_core" ]; then
+        warn "Не нашёл файлы в API — беру версию 1.7.4-r2"
+        if [ "$_ext" = "apk" ]; then
+            _core="internet-detector-1.7.4-r2.apk"
+            _luci="luci-app-internet-detector-1.7.4-r2.apk"
+            _ru="luci-i18n-internet-detector-ru-1.7.4-r2.apk"
         else
-            FILE_CORE="internet-detector_1.7.4-r2_all.ipk"
-            FILE_LUCI="luci-app-internet-detector_1.7.4-r2_all.ipk"
-            FILE_RU="luci-i18n-internet-detector-ru_1.7.4-r2_all.ipk"
+            _core="internet-detector_1.7.4-r2_all.ipk"
+            _luci="luci-app-internet-detector_1.7.4-r2_all.ipk"
+            _ru="luci-i18n-internet-detector-ru_1.7.4-r2_all.ipk"
         fi
     fi
 
-    RAW_BASE="https://github.com/gSpotx2f/packages-openwrt/raw/master/$BRANCH"
+    _base="https://github.com/gSpotx2f/packages-openwrt/raw/master/$_branch"
+    _fail=0
+    for _f in "$_core" "$_luci" "$_ru"; do
+        [ -z "$_f" ] && continue
+        info "Ставлю $_f"
+        if fetch_file "$_base/$_f" "/tmp/$_f" \
+            && $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$_f" >/tmp/setup-install.log 2>&1; then
+            ok "$_f установлен"
+        else
+            err "Ошибка: $_f"
+            _fail=1
+        fi
+        rm -f "/tmp/$_f"
+    done
 
-    echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_CORE${NC}"
-    wget --no-check-certificate -O "/tmp/$FILE_CORE" "$RAW_BASE/$FILE_CORE" || { echo -e "${RED}Ошибка скачивания Core${NC}"; return 1; }
-    $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_CORE"
-    rm -f "/tmp/$FILE_CORE"
+    if [ -x /etc/init.d/internet-detector ]; then
+        /etc/init.d/internet-detector enable 2>/dev/null
+        /etc/init.d/internet-detector restart 2>/dev/null
+    fi
+    /etc/init.d/rpcd restart 2>/dev/null
 
-    service internet-detector start 2>/dev/null
-    service internet-detector enable 2>/dev/null
-
-    echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_LUCI${NC}"
-    wget --no-check-certificate -O "/tmp/$FILE_LUCI" "$RAW_BASE/$FILE_LUCI" || { echo -e "${RED}Ошибка скачивания LuCI App${NC}"; return 1; }
-    $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_LUCI"
-    rm -f "/tmp/$FILE_LUCI"
-
-    service rpcd restart 2>/dev/null
-
-    echo -e "${GREEN}>>> Скачиваю и устанавливаю: $FILE_RU${NC}"
-    wget --no-check-certificate -O "/tmp/$FILE_RU" "$RAW_BASE/$FILE_RU" || { echo -e "${RED}Ошибка скачивания локализации${NC}"; return 1; }
-    $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$FILE_RU"
-    rm -f "/tmp/$FILE_RU"
-
-    echo -e "${GREEN}>>> Internet Detector успешно установлен!${NC}"
+    if [ "$_fail" = "0" ]; then
+        ok "Internet Detector установлен"
+        add_result ok "Internet Detector"
+    else
+        add_result fail "Internet Detector"
+    fi
 }
 
-install_theme() {
-    echo -e "${GREEN}>>> Устанавливаю тему luci-theme-footstrap...${NC}"
-    if ! command -v wget >/dev/null 2>&1; then
-        $INSTALL_CMD wget || return 1
+# Тема Koka ставится поверх движка footstrap: ставим движок только при необходимости
+ensure_footstrap() {
+    [ -f /www/luci-static/footstrap/cascade.css ] && return 0
+    info "Ставлю движок footstrap, нужный теме Koka"
+    if $INSTALL_CMD $ALLOW_UNTRUSTED luci-theme-footstrap >/tmp/setup-install.log 2>&1; then
+        return 0
     fi
-    
-    wget -qO- https://raw.githubusercontent.com/VizzleTF/luci-theme-footstrap/main/install.sh | sh || {
-        echo -e "${RED}Ошибка установки темы${NC}"
-        return 1
-    }
-
-    echo -e "${GREEN}>>> Устанавливаю русскую локализацию для темы через $PKG_MGR...${NC}"
-    $INSTALL_CMD $ALLOW_UNTRUSTED luci-i18n-footstrap-ru || {
-        echo -e "${YELLOW}Не удалось установить локализацию темы через менеджер пакетов (возможно, её нет в репозитории вашей версии прошивки)${NC}"
-    }
-
-    echo -e "${GREEN}>>> Тема и локализация обработаны${NC}"
+    _tmp=/tmp/footstrap-install.sh
+    if fetch_file "https://raw.githubusercontent.com/VizzleTF/luci-theme-footstrap/main/install.sh" "$_tmp" >/dev/null 2>&1; then
+        sh "$_tmp" >>/tmp/setup-install.log 2>&1
+    fi
+    rm -f "$_tmp"
+    [ -f /www/luci-static/footstrap/cascade.css ]
 }
 
 install_koka_theme() {
-    echo -e "${GREEN}>>> Устанавливаю мою тему Koka Modern...${NC}"
+    step "Тема Koka Modern"
+    ensure_footstrap || warn "Движок footstrap не удалось поставить — тема может не заработать"
+    install_github_pkg "$KOKA_REPO" "$KOKA_PKG" "$KOKA_FALLBACK" || return 1
 
-    # Koka — скин поверх движка luci-theme-footstrap
-    if ! $INSTALL_CMD $ALLOW_UNTRUSTED luci-theme-footstrap >/dev/null 2>&1; then
-        if [ ! -f /www/luci-static/footstrap/cascade.css ]; then
-            echo -e "${BLUE}>>> Движок footstrap не найден, сначала ставлю его...${NC}"
-            install_theme
-        fi
+    if uci -q get luci.main >/dev/null 2>&1; then
+        uci set luci.main.mediaurlbase='/luci-static/footstrap'
+        uci commit luci
     fi
-
-    install_github_pkg "$KOKA_REPO" "$KOKA_PKG_NAME" "$KOKA_FALLBACK_VER" || {
-        echo -e "${RED}Не удалось установить тему Koka${NC}"
-        return 1
-    }
-
-    # Пакет сам применяет скин и дашборд, но тему в LuCI включаем на всякий случай
-    uci set luci.main.mediaurlbase='/luci-static/footstrap' 2>/dev/null
-    uci commit luci 2>/dev/null
-
     /etc/init.d/rpcd restart 2>/dev/null
     rm -rf /tmp/luci-indexcache* 2>/dev/null
 
-    echo -e "${GREEN}>>> Тема Koka установлена. Обновите страницу LuCI (F5)${NC}"
-    echo -e "${CYAN}>>> Выбрать тему: Система -> Дизайн -> Koka${NC}"
+    ok "Тема Koka активна — обнови страницу LuCI (F5)"
+    info "Выбрать тему можно в: Система -> Дизайн -> Koka"
+}
+
+ask_zerotier_id() {
+    [ -n "$ZEROTIER_NET_ID" ] && return 0
+    echo ""
+    printf '%bВведите Network ID ZeroTier (Enter — пропустить):%b ' "$C_CYN" "$C_RST"
+    read -r ZEROTIER_NET_ID
 }
 
 install_zerotier() {
-    echo -e "${GREEN}>>> Устанавливаю ZeroTier (поддержка opkg/apk)...${NC}"
-    $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier luci-i18n-zerotier-ru 2>/dev/null || \
-    $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier 2>/dev/null || \
-    $INSTALL_CMD $ALLOW_UNTRUSTED zerotier || {
-        echo -e "${RED}Ошибка установки ZeroTier${NC}"
-        return 1
-    }
+    step "ZeroTier"
 
-    if [ -z "$ZEROTIER_NET_ID" ]; then
-        echo ""
-        echo -e "${CYAN}Введите 16-значный ID вашей сети ZeroTier (Network ID):${NC}"
-        read -r ZEROTIER_NET_ID
+    if ! $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier luci-i18n-zerotier-ru >/dev/null 2>&1; then
+        $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier >/dev/null 2>&1 || \
+        $INSTALL_CMD $ALLOW_UNTRUSTED zerotier >/dev/null 2>&1 || true
     fi
 
+    load_installed
+    if ! is_installed zerotier; then
+        err "ZeroTier не установлен"
+        add_result fail "ZeroTier"
+        return 1
+    fi
+    ok "Пакеты ZeroTier установлены"
+
+    ask_zerotier_id
     if [ -n "$ZEROTIER_NET_ID" ]; then
-        echo -e "${GREEN}>>> Наношу конфигурацию ZeroTier через UCI...${NC}"
+        info "Настраиваю сеть $ZEROTIER_NET_ID"
         uci set zerotier.openwrt_network=zerotier
         uci set zerotier.openwrt_network.enabled='1'
         uci -q delete zerotier.openwrt_network.join
         uci add_list zerotier.openwrt_network.join="$ZEROTIER_NET_ID"
         uci commit zerotier
     else
-        echo -e "${YELLOW}Network ID не введен. Подключение к сети пропущено.${NC}"
+        warn "Network ID не введён — подключение к сети пропущено"
     fi
 
-    echo -e "${GREEN}>>> Запускаю службу ZeroTier...${NC}"
-    /etc/init.d/zerotier enable
-    /etc/init.d/zerotier restart
+    if [ -x /etc/init.d/zerotier ]; then
+        /etc/init.d/zerotier enable 2>/dev/null
+        /etc/init.d/zerotier restart 2>/dev/null
+    fi
 
-    echo -e "${BLUE}>>> Ожидание инициализации и генерации виртуального интерфейса (3 сек)...${NC}"
+    info "Жду появления интерфейса (3 сек)"
     sleep 3
 
-    # Динамический поиск реального уникального интерфейса ztXXXXX
-    ZT_IFACE=$(ip -o link show | awk -F': ' '$2 ~ /^zt/ {print $2}' | head -n 1)
+    # ищем реальный интерфейс ztXXXXX
+    ZT_IFACE=$(ip -o link show 2>/dev/null | awk -F': ' '$2 ~ /^zt/ {print $2}' | head -n 1)
 
     if [ -n "$ZT_IFACE" ]; then
-        echo -e "${GREEN}>>> Обнаружен интерфейс ZeroTier: $ZT_IFACE. Привязываю к сети...${NC}"
+        info "Нашёл интерфейс $ZT_IFACE — привязываю к сети"
         uci set network.zerotier=interface
         uci set network.zerotier.proto='none'
         uci set network.zerotier.device="$ZT_IFACE"
-        
-        # Создаем отдельную зону фаервола 'zerotier' для доступа к роутеру (SSH / LuCI)
-        if ! uci show firewall | grep -q "name='zerotier'"; then
-            uci add firewall zone
+
+        if ! uci show firewall 2>/dev/null | grep -q "name='zerotier'"; then
+            uci add firewall zone >/dev/null
             uci set firewall.@zone[-1].name='zerotier'
             uci set firewall.@zone[-1].input='ACCEPT'
             uci set firewall.@zone[-1].output='ACCEPT'
             uci set firewall.@zone[-1].forward='ACCEPT'
             uci set firewall.@zone[-1].masq='1'
             uci add_list firewall.@zone[-1].network='zerotier'
+            uci commit firewall
         fi
-        
-        uci commit network
-        uci commit firewall
 
-        /etc/init.d/network restart
-        /etc/init.d/firewall restart
-        echo -e "${GREEN}>>> ZeroTier успешно настроен и привязан к интерфейсу $ZT_IFACE!${NC}"
+        uci commit network
+        /etc/init.d/network restart >/dev/null 2>&1
+        /etc/init.d/firewall restart >/dev/null 2>&1
+        ok "ZeroTier привязан к интерфейсу $ZT_IFACE"
     else
-        echo -e "${YELLOW}Предупреждение: Интерфейс zt* не появился в системе.${NC}"
-        echo -e "${YELLOW}Убедитесь, что роутер имеет доступ в интернет, а затем перезагрузите устройство.${NC}"
+        warn "Интерфейс zt* не появился — проверь интернет и перезагрузи роутер"
     fi
-    echo -e "${CYAN}Важно: Не забудьте авторизовать этот роутер в панели управления на https://my.zerotier.com${NC}"
+
+    info "Не забудь авторизовать роутер: https://my.zerotier.com"
+    add_result ok "ZeroTier"
 }
 
 fix_apk_luci() {
-    echo -e "${GREEN}>>> Применяю фикс пакетного менеджера для LuCI...${NC}"
+    step "Фикс APK в LuCI"
     if [ -f /usr/libexec/package-manager-call ]; then
         sed -i 's/action="add"/action="add --allow-untrusted"/g' /usr/libexec/package-manager-call
-        echo -e "${GREEN}>>> Фикс успешно применен${NC}"
+        ok "Фикс применён — локальные пакеты ставятся из LuCI"
+        add_result ok "Фикс APK в LuCI"
     else
-        echo -e "${YELLOW}Файл /usr/libexec/package-manager-call не найден (возможно, не версия 25.12)${NC}"
+        warn "Файл не найден — похоже, это не OpenWrt 25.12"
+        add_result fail "Фикс APK в LuCI"
     fi
 }
 
 disable_ipv6() {
-    echo -e "${GREEN}>>> Отключаю IPv6...${NC}"
+    step "Отключение IPv6"
     uci set network.lan.ipv6='0'
     uci set network.wan.ipv6='0'
-    uci set network.lan.delegate="0"
-
-    uci set dhcp.lan.dhcpv6='disabled'
+    uci set network.lan.delegate='0'
     uci -q delete dhcp.lan.dhcpv6
     uci -q delete dhcp.lan.ra
-
+    uci -q delete dhcp.lan.ra_slaac
     uci -q delete network.globals.ula_prefix
-
-    /etc/init.d/odhcpd disable
-    /etc/init.d/odhcpd stop
-
     uci set dhcp.@dnsmasq[0].filter_aaaa='1'
-
     uci commit
-    /etc/init.d/network restart
-    /etc/init.d/dnsmasq restart
-    echo -e "${GREEN}>>> IPv6 успешно отключен${NC}"
+
+    if [ -x /etc/init.d/odhcpd ]; then
+        /etc/init.d/odhcpd disable 2>/dev/null
+        /etc/init.d/odhcpd stop 2>/dev/null
+    fi
+    /etc/init.d/network restart >/dev/null 2>&1
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1
+
+    ok "IPv6 отключён"
+    add_result ok "Отключение IPv6"
 }
 
-# ---------- Логика выполнения ----------
-if [ "$choice" = "0" ]; then
-    echo -e "${YELLOW}>>> Устанавливаю все компоненты и применяю настройки...${NC}"
-    
-    # Запрос ID сети заранее при выборе пункта "0"
-    echo ""
-    echo -e "${CYAN}Введите 16-значный ID вашей сети ZeroTier (Network ID) [можно пропустить, нажав Enter]:${NC}"
-    read -r ZEROTIER_NET_ID
+# ---------- Запуск компонентов ----------
+run_feature() {
+    case "$1" in
+        dnsproxy)           install_dnsproxy ;;
+        dnsproxy-config)    apply_dnsproxy_config ;;
+        zapret)             install_zapret ;;
+        splify)             install_splify ;;
+        internet-detector)  install_internet_detector ;;
+        luci-theme-koka)    install_koka_theme ;;
+        zerotier)           install_zerotier ;;
+        fix-apk)            fix_apk_luci ;;
+        ipv6-off)           disable_ipv6 ;;
+        *)                  err "Неизвестный компонент: $1" ;;
+    esac
+}
 
-    echo "$PACKAGES" | while IFS='|' read -r pkg desc; do
+install_all() {
+    step "Режим «Установить всё»"
+
+    ask_zerotier_id
+    step "Обновляю списки пакетов ($PKG_MGR)"
+    if $UPDATE_CMD >/tmp/setup-update.log 2>&1; then
+        ok "Списки обновлены"
+    else
+        warn "Не удалось обновить списки — продолжаю"
+    fi
+    load_installed
+
+    step "Базовые пакеты"
+    while IFS='|' read -r pkg desc; do
         [ -z "$pkg" ] && continue
         install_pkg "$pkg"
-    done
+    done <<EOF
+$PACKAGES
+EOF
+
     install_dnsproxy
     install_zapret
     install_splify
     install_internet_detector
-    install_theme
     install_koka_theme
     install_zerotier
     fix_apk_luci
     disable_ipv6
-else
-    for num in $choice; do
-        case "$num" in
-            *[!0-9]*) 
-                echo -e "${RED}Неверный выбор: $num${NC}"
-                continue 
-                ;;
+}
+
+# ---------- Меню ----------
+draw_menu() {
+    [ -t 1 ] && clear 2>/dev/null
+    printf '%b============================================================%b\n' "$C_BLU" "$C_RST"
+    printf '%b  Start_setup_OpenWrt %s%b\n' "$C_BLD" "$APP_VER" "$C_RST"
+    printf '%b  OpenWrt %s  |  %s  |  %s%b\n' "$C_DIM" "$RELEASE" "$ARCH" "$PKG_MGR" "$C_RST"
+    printf '%b============================================================%b\n' "$C_BLU" "$C_RST"
+    printf '%b  [+] уже установлено   [ ] не установлено%b\n\n' "$C_DIM" "$C_RST"
+
+    printf '%b  БАЗОВЫЕ ПАКЕТЫ%b\n' "$C_CYN" "$C_RST"
+    _i=1
+    while IFS='|' read -r pkg desc; do
+        [ -z "$pkg" ] && continue
+        if is_installed "$pkg"; then _pc="$C_GRN"; _mark="+"; else _pc="$C_DIM"; _mark=" "; fi
+        printf '  %b[%s]%b %2d) %-25s %b%s%b\n' "$_pc" "$_mark" "$C_RST" "$_i" "$pkg" "$C_DIM" "$desc" "$C_RST"
+        _i=$((_i + 1))
+    done <<EOF
+$PACKAGES
+EOF
+
+    printf '\n%b  КОМПОНЕНТЫ%b\n' "$C_CYN" "$C_RST"
+    _i=$FEAT_START
+    while IFS='|' read -r key desc pkg; do
+        [ -z "$key" ] && continue
+        if [ -n "$pkg" ] && is_installed "$pkg"; then _pc="$C_GRN"; _mark="+"; else _pc="$C_DIM"; _mark=" "; fi
+        printf '  %b[%s]%b %2d) %-25s %b%s%b\n' "$_pc" "$_mark" "$C_RST" "$_i" "$key" "$C_DIM" "$desc" "$C_RST"
+        _i=$((_i + 1))
+    done <<EOF
+$FEATURES
+EOF
+
+    echo ""
+    line
+    printf '  %b0%b) Установить всё\n' "$C_GRN" "$C_RST"
+    printf '  %bq%b) Выход\n' "$C_RED" "$C_RST"
+    line
+    printf '%b  Можно выбрать несколько: 1 4 7, диапазон 2-5 или 0 — всё%b\n' "$C_DIM" "$C_RST"
+}
+
+usage() {
+    cat <<EOF
+Start_setup_OpenWrt $APP_VER
+
+  sh $0            интерактивное меню
+  sh $0 1 4 9      выбранные пункты
+  sh $0 2-5        диапазон пунктов
+  sh $0 --all      установить всё
+EOF
+}
+
+# разворачивает "1 2-4,7" в " 1 2 3 4 7", а 0/all — в ALL
+expand_selection() {
+    _out=""
+    for _tok in $(printf '%s' "$1" | tr ',' ' '); do
+        case "$_tok" in
+            a|A|all|ALL|0)
+                _out="ALL"; break ;;
+            *-*)
+                _a=${_tok%%-*}; _b=${_tok##*-}
+                case "$_a" in ''|*[!0-9]*) err "Пропускаю: $_tok"; continue ;; esac
+                case "$_b" in ''|*[!0-9]*) err "Пропускаю: $_tok"; continue ;; esac
+                if [ "$_a" -gt "$_b" ]; then _t="$_a"; _a="$_b"; _b="$_t"; fi
+                while [ "$_a" -le "$_b" ]; do
+                    _out="$_out $_a"
+                    _a=$((_a + 1))
+                done ;;
+            *)
+                case "$_tok" in *[!0-9]*) err "Пропускаю: $_tok"; continue ;; esac
+                _out="$_out $_tok" ;;
         esac
+    done
+    printf '%s' "$_out"
+}
 
-        if [ "$num" -eq "$DNSPROXY_NUM" ]; then
-            install_dnsproxy
-            continue
+install_base_by_num() {
+    _n=1
+    while IFS='|' read -r pkg desc; do
+        [ -z "$pkg" ] && continue
+        if [ "$_n" -eq "$1" ]; then
+            install_pkg "$pkg"
+            return 0
         fi
-        if [ "$num" -eq "$CFG_DNSPROXY_NUM" ]; then
-            apply_dnsproxy_config
-            continue
-        fi
-        if [ "$num" -eq "$ZAPRET_NUM" ]; then
-            install_zapret
-            continue
-        fi
-        if [ "$num" -eq "$SPLIFY_NUM" ]; then
-            install_splify
-            continue
-        fi
-        if [ "$num" -eq "$INETDET_NUM" ]; then
-            install_internet_detector
-            continue
-        fi
-        if [ "$num" -eq "$THEME_NUM" ]; then
-            install_theme
-            continue
-        fi
-        if [ "$num" -eq "$KOKA_NUM" ]; then
-            install_koka_theme
-            continue
-        fi
-        if [ "$num" -eq "$ZEROTIER_NUM" ]; then
-            install_zerotier
-            continue
-        fi
-        if [ "$num" -eq "$FIXAPK_NUM" ]; then
-            fix_apk_luci
-            continue
-        fi
-        if [ "$num" -eq "$IPV6_NUM" ]; then
-            disable_ipv6
-            continue
-        fi
+        _n=$((_n + 1))
+    done <<EOF
+$PACKAGES
+EOF
+}
 
-        i=1
-        echo "$PACKAGES" | while IFS='|' read -r pkg desc; do
-            [ -z "$pkg" ] && continue
-            if [ "$i" -eq "$num" ]; then
-                install_pkg "$pkg"
-            fi
-            i=$((i + 1))
-        done
+feature_key_by_num() {
+    _n=$FEAT_START
+    while IFS='|' read -r key desc pkg; do
+        [ -z "$key" ] && continue
+        if [ "$_n" -eq "$1" ]; then
+            printf '%s' "$key"
+            return 0
+        fi
+        _n=$((_n + 1))
+    done <<EOF
+$FEATURES
+EOF
+}
+
+# ---------- Главный сценарий ----------
+choice=""
+if [ $# -gt 0 ]; then
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        -a|--all) choice="0" ;;
+        *) choice="$*" ;;
+    esac
+else
+    load_installed
+    draw_menu
+    printf '%bВыбор:%b ' "$C_BLD" "$C_RST"
+    read -r choice
+fi
+
+case "$choice" in
+    "") echo "Выход."; exit 0 ;;
+    q|Q|quit|exit) echo "Выход."; exit 0 ;;
+esac
+
+SELECTION=$(expand_selection "$choice")
+if [ -z "$SELECTION" ]; then
+    err "Ничего не выбрано"
+    exit 1
+fi
+
+if [ "$SELECTION" = "ALL" ]; then
+    install_all
+else
+    # обновление списков не нужно, если выбран только готовый конфиг dnsproxy
+    need_update=1
+    [ "$SELECTION" = " $((FEAT_START + 1))" ] && need_update=0
+
+    if [ "$need_update" = "1" ]; then
+        step "Обновляю списки пакетов ($PKG_MGR)"
+        if $UPDATE_CMD >/tmp/setup-update.log 2>&1; then
+            ok "Списки обновлены"
+        else
+            warn "Не удалось обновить списки — продолжаю"
+        fi
+        load_installed
+    fi
+
+    for num in $SELECTION; do
+        if [ "$num" -ge 1 ] && [ "$num" -le "$BASE_COUNT" ]; then
+            install_base_by_num "$num"
+        elif [ "$num" -ge "$FEAT_START" ] && [ "$num" -le "$MAX_NUM" ]; then
+            run_feature "$(feature_key_by_num "$num")"
+        else
+            err "Пункта $num нет (доступно 1-$MAX_NUM)"
+        fi
     done
 fi
 
+# ---------- Итог ----------
 echo ""
-echo -e "${BLUE}==================================================${NC}"
-echo -e "${GREEN}  Все задачи выполнены!${NC}"
-echo -e "${BLUE}==================================================${NC}"
+line
+printf '%b  Итог%b\n' "$C_BLD" "$C_RST"
+printf '%b\n' "$SUM_LINES"
+echo ""
+if [ "$SUM_FAIL" -eq 0 ]; then
+    printf '%b  Готово: успешно %s, ошибок нет%b\n' "$C_GRN" "$SUM_OK" "$C_RST"
+else
+    printf '%b  Успешно: %s   С ошибками: %s%b\n' "$C_YEL" "$SUM_OK" "$SUM_FAIL" "$C_RST"
+fi
+line
