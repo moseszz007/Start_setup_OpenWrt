@@ -102,10 +102,19 @@ MAX_NUM=$((BASE_COUNT + FEAT_COUNT))
 GH_USER="moseszz007"
 DNSPROXY_REPO="$GH_USER/luci-app-dnsproxy"
 DNSPROXY_PKG="luci-app-dnsproxy"
-DNSPROXY_FALLBACK="2026.11.27-r4"
+DNSPROXY_FALLBACK="2026.11.28-r1"
 KOKA_REPO="$GH_USER/luci-theme-koka"
 KOKA_PKG="luci-theme-koka"
-KOKA_FALLBACK="2026.11.27-r21"
+KOKA_FALLBACK="2026.11.28-r22"
+
+# Прямая ссылка на конкретный релиз — без GitHub API, без поиска "последнего"
+release_url() {   # <repo> <pkg> <версия> <apk|ipk>
+    if [ "$4" = "apk" ]; then
+        printf 'https://github.com/%s/releases/download/v%s/%s-%s.apk' "$1" "$3" "$2" "$3"
+    else
+        printf 'https://github.com/%s/releases/download/v%s/%s_%s_all.ipk' "$1" "$3" "$2" "$3"
+    fi
+}
 
 # ---------- Загрузчик ----------
 DOWNLOADER=""
@@ -128,44 +137,73 @@ ensure_downloader() {
     [ -n "$DOWNLOADER" ]
 }
 
+# Жёсткий лимит времени: если загрузчик завис, процесс убивается сам
+run_limited() {   # <секунды> <команда...>
+    _lim="$1"; shift
+    "$@" < /dev/null &
+    _pid=$!
+    _n=0
+    while kill -0 "$_pid" 2>/dev/null; do
+        if [ "$_n" -ge "$_lim" ]; then
+            kill -9 "$_pid" 2>/dev/null
+            wait "$_pid" 2>/dev/null
+            return 124
+        fi
+        sleep 1
+        _n=$((_n + 1))
+    done
+    wait "$_pid" 2>/dev/null
+}
+
 # Пробует все загрузчики по очереди: на части прошивок uclient-fetch
 # не умеет редиректы github.com, поэтому одного выбранного мало.
 http_get() {
     _f="/tmp/setup-http.$$"
-    rm -f "$_f"
+    _p="$_f.part"
+    rm -f "$_f" "$_p"
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --max-time 25 -A "Start_setup_OpenWrt" -o "$_f" "$1" 2>/dev/null
+        run_limited 30 curl -fsSL --connect-timeout 8 --max-time 25 \
+            -A "Start_setup_OpenWrt" -o "$_p" "$1" 2>/dev/null
+        [ -s "$_p" ] && mv -f "$_p" "$_f"
     fi
     if [ ! -s "$_f" ] && command -v wget >/dev/null 2>&1; then
-        wget -q -T 25 --header="User-Agent: Start_setup_OpenWrt" -O "$_f" "$1" 2>/dev/null
+        run_limited 30 wget -q -T 25 -t 1 --header="User-Agent: Start_setup_OpenWrt" -O "$_p" "$1" 2>/dev/null
+        [ -s "$_p" ] && mv -f "$_p" "$_f"
     fi
     if [ ! -s "$_f" ] && command -v uclient-fetch >/dev/null 2>&1; then
-        uclient-fetch -q -T 25 --header="User-Agent: Start_setup_OpenWrt" -O "$_f" "$1" 2>/dev/null
+        run_limited 30 uclient-fetch -q -T 25 --header="User-Agent: Start_setup_OpenWrt" -O "$_p" "$1" 2>/dev/null
+        [ -s "$_p" ] && mv -f "$_p" "$_f"
     fi
     if [ -s "$_f" ]; then
         cat "$_f"
-        rm -f "$_f"
+        rm -f "$_f" "$_p"
         return 0
     fi
-    rm -f "$_f"
+    rm -f "$_f" "$_p"
     return 1
 }
 
 fetch_file() {
+    rm -f "$2"
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --max-time 120 -o "$2" "$1" && { DOWNLOADER="curl"; return 0; }
+        run_limited 90 curl -fsSL --connect-timeout 10 --max-time 60 -o "$2" "$1" 2>/dev/null
+        [ -s "$2" ] && { DOWNLOADER="curl"; return 0; }
     fi
     if command -v wget >/dev/null 2>&1; then
-        wget -q -T 120 -O "$2" "$1" && { DOWNLOADER="wget"; return 0; }
+        run_limited 90 wget -q -T 60 -t 1 -O "$2" "$1" 2>/dev/null
+        [ -s "$2" ] && { DOWNLOADER="wget"; return 0; }
     fi
     if command -v uclient-fetch >/dev/null 2>&1; then
-        uclient-fetch -q -T 120 -O "$2" "$1" && { DOWNLOADER="uclient-fetch"; return 0; }
+        run_limited 90 uclient-fetch -q -T 60 -O "$2" "$1" 2>/dev/null
+        [ -s "$2" ] && { DOWNLOADER="uclient-fetch"; return 0; }
     fi
     if [ "$DOWNLOADER" != "curl" ]; then
         info "Ставлю curl для загрузки"
         $INSTALL_CMD curl >>/tmp/setup-install.log 2>&1 && \
-            curl -fsSL --max-time 120 -o "$2" "$1" && { DOWNLOADER="curl"; return 0; }
+            run_limited 90 curl -fsSL --connect-timeout 10 --max-time 60 -o "$2" "$1" 2>/dev/null && \
+            [ -s "$2" ] && { DOWNLOADER="curl"; return 0; }
     fi
+    rm -f "$2"
     return 1
 }
 
@@ -219,32 +257,29 @@ install_github_pkg() {
     if [ "$PKG_MGR" = "apk" ]; then _ext="apk"; else _ext="ipk"; fi
     _file="/tmp/$_pkg.$_ext"
 
-    info "Ищу последний релиз $_pkg"
-    _url=$(github_asset "$_repo" "$_pkg" "$_ext")
-    if [ -z "$_url" ]; then
-        warn "GitHub API недоступен — беру версию $_fb"
-        if [ "$_ext" = "apk" ]; then
-            _url="https://github.com/$_repo/releases/download/v$_fb/$_pkg-$_fb.apk"
-        else
-            _url="https://github.com/$_repo/releases/download/v$_fb/${_pkg}_${_fb}_all.ipk"
+    # 1) сразу качаем закреплённый релиз по прямой ссылке — API не нужен
+    _url=$(release_url "$_repo" "$_pkg" "$_fb" "$_ext")
+    info "Скачиваю $_pkg $_fb"
+    if ! fetch_file "$_url" "$_file"; then
+        # 2) не вышло — только тогда спрашиваем API (с жёстким лимитом времени)
+        info "Прямая ссылка не открылась — ищу последний релиз $_pkg"
+        _url=$(github_asset "$_repo" "$_pkg" "$_ext")
+        [ -z "$_url" ] && _url=$(release_url "$_repo" "$_pkg" "$_fb" "$_ext")
+        info "Скачиваю $(basename "$_url")"
+        if ! fetch_file "$_url" "$_file"; then
+            err "Ошибка скачивания $_pkg"
+            rm -f "$_file"
+            add_result fail "$_pkg"
+            return 1
         fi
     fi
 
     # для apk нужен ключ подписи пакета
     if [ "$_ext" = "apk" ] && [ ! -s "/etc/apk/keys/$_pkg.rsa.pub" ]; then
-        _key=$(github_asset "$_repo" "$_pkg.rsa.pub" pub)
-        [ -z "$_key" ] && _key="https://github.com/$_repo/releases/download/v$_fb/$_pkg.rsa.pub"
+        _key="https://github.com/$_repo/releases/download/v$_fb/$_pkg.rsa.pub"
         mkdir -p /etc/apk/keys
         fetch_file "$_key" "/etc/apk/keys/$_pkg.rsa.pub" >/dev/null 2>&1 || \
             warn "Ключ подписи не скачан"
-    fi
-
-    info "Скачиваю $(basename "$_url")"
-    if ! fetch_file "$_url" "$_file"; then
-        err "Ошибка скачивания $_pkg"
-        rm -f "$_file"
-        add_result fail "$_pkg"
-        return 1
     fi
 
     _done=0
