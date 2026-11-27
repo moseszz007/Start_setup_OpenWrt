@@ -29,8 +29,9 @@ sh Start_setup_OpenWrt.sh --help     # справка
 
 ## Мои пакеты
 
-Версии берутся из последних GitHub Releases (`.ipk` для opkg, `.apk` + ключ
-подписи для apk), при недоступности API используется закреплённая версия.
+Версии закреплены в скрипте: пакет качается напрямую по ссылке на релиз
+(`.ipk` для opkg, `.apk` + ключ подписи для apk), без запроса к GitHub API.
+API используется только если прямая ссылка не открылась.
 
 - **luci-theme-koka** — [luci-theme-koka](https://github.com/moseszz007/luci-theme-koka):
   самостоятельная тема Koka Modern (свой движок, дашборд и иконки).
@@ -46,9 +47,8 @@ sh Start_setup_OpenWrt.sh --help     # справка
 9. DNS Proxy — демон, мой UI и готовый конфиг.
 10. Только конфиг DNS Proxy.
 11. Zapret Manager.
-12. Splify2.
-13. Internet Detector с русификатором.
-14. Тема Koka Modern.
-15. ZeroTier.
-16. Фикс APK в LuCI (25.12).
-17. Отключение IPv6.
+12. Internet Detector с русификатором.
+13. Тема Koka Modern.
+14. ZeroTier.
+15. Фикс APK в LuCI (25.12).
+16. Отключение IPv6.

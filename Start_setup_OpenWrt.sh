@@ -85,7 +85,6 @@ FEATURES="
 dnsproxy|DNS Proxy: мой UI + готовый конфиг|luci-app-dnsproxy
 dnsproxy-config|Только применить готовый конфиг|
 zapret|Zapret Manager: обход блокировок|
-splify|Splify2: маршрутизация трафика|
 internet-detector|Детектор интернета + русификатор|luci-app-internet-detector
 luci-theme-koka|Моя тема: скин и дашборд|luci-theme-koka
 zerotier|VPN-доступ к роутеру|zerotier
@@ -422,22 +421,6 @@ install_zapret() {
     rm -f "$_tmp"
 }
 
-install_splify() {
-    step "Splify2"
-    ensure_downloader || { err "Нет wget/curl"; add_result fail "Splify2"; return 1; }
-    _tmp=/tmp/splify-install.sh
-    info "Скачиваю установщик"
-    if fetch_file "https://gitlab.com/xyzmean/splify2/-/raw/main/install.sh" "$_tmp" \
-        && sh "$_tmp"; then
-        ok "Splify2 установлен"
-        add_result ok "Splify2"
-    else
-        err "Ошибка установки Splify2"
-        add_result fail "Splify2"
-    fi
-    rm -f "$_tmp"
-}
-
 # Выбрать имя файла из JSON-листинга GitHub: <json> <вхождение> [исключить]
 _pick_asset() {
     if [ -n "$3" ]; then
@@ -640,7 +623,6 @@ run_feature() {
         dnsproxy)           install_dnsproxy ;;
         dnsproxy-config)    apply_dnsproxy_config ;;
         zapret)             install_zapret ;;
-        splify)             install_splify ;;
         internet-detector)  install_internet_detector ;;
         luci-theme-koka)    install_koka_theme ;;
         zerotier)           install_zerotier ;;
@@ -672,7 +654,6 @@ EOF
 
     install_dnsproxy
     install_zapret
-    install_splify
     install_internet_detector
     install_koka_theme
     install_zerotier
