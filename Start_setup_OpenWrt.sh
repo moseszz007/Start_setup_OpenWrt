@@ -466,11 +466,25 @@ install_internet_detector() {
     for _f in "$_core" "$_luci" "$_ru"; do
         [ -z "$_f" ] && continue
         info "Ставлю $_f"
-        if fetch_file "$_base/$_f" "/tmp/$_f" \
-            && $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$_f" >/tmp/setup-install.log 2>&1; then
+        if ! fetch_file "$_base/$_f" "/tmp/$_f"; then
+            err "Не скачался $_f"
+            _fail=1
+            continue
+        fi
+        $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$_f" >/tmp/setup-install.log 2>&1
+        _rc=$?
+        if [ "$_rc" != "0" ]; then
+            # чаще всего это устаревшие списки пакетов — обновляю и повторяю
+            warn "Не встал с первого раза — обновляю списки и повторяю"
+            $UPDATE_CMD >/tmp/setup-update.log 2>&1
+            $INSTALL_CMD $ALLOW_UNTRUSTED "/tmp/$_f" >/tmp/setup-install.log 2>&1
+            _rc=$?
+        fi
+        if [ "$_rc" = "0" ]; then
             ok "$_f установлен"
         else
             err "Ошибка: $_f"
+            tail -n 3 /tmp/setup-install.log 2>/dev/null | sed 's/^/       /'
             _fail=1
         fi
         rm -f "/tmp/$_f"
