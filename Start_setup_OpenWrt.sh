@@ -104,13 +104,13 @@ DNSPROXY_PKG="luci-app-dnsproxy"
 DNSPROXY_FALLBACK="2026.11.28-r1"
 KOKA_REPO="$GH_USER/luci-theme-koka"
 KOKA_PKG="luci-theme-koka"
-KOKA_FALLBACK="2026.11.28-r45"
+KOKA_FALLBACK="2026.11.28-r67"
 ZT_REPO="$GH_USER/luci-app-zerotier"
 ZT_PKG="luci-app-zerotier"
 ZT_FALLBACK="2026.11.28-r4"
 IDET_REPO="$GH_USER/luci-app-internet-detector"
 IDET_PKG="luci-app-internet-detector"
-IDET_FALLBACK="2026.11.28-r5"
+IDET_FALLBACK="2026.11.28-r9"
 
 # Прямая ссылка на конкретный релиз — без GitHub API, без поиска "последнего"
 release_url() {   # <repo> <pkg> <версия> <apk|ipk>
@@ -503,8 +503,13 @@ install_internet_detector() {
     /etc/init.d/rpcd restart 2>/dev/null
 
     if [ "$_fail" = "0" ]; then
-        # моя сборка LuCI-приложения (статусы на дашборде) вместо фидовой
-        install_github_pkg "$IDET_REPO" "$IDET_PKG" "$IDET_FALLBACK" >/dev/null 2>&1 || true
+        # моя сборка LuCI-приложения (статусы и настройки на дашборде)
+        # встаёт поверх фидовой как обновление того же пакета
+        if install_github_pkg "$IDET_REPO" "$IDET_PKG" "$IDET_FALLBACK"; then
+            ok "Internet Detector: моя сборка LuCI ($IDET_FALLBACK)"
+        else
+            warn "Моя сборка LuCI не встала — осталась фидовая"
+        fi
         ok "Internet Detector установлен"
         add_result ok "Internet Detector"
     else

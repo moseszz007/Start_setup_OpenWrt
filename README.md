@@ -40,6 +40,9 @@ API используется только если прямая ссылка н�
 - **luci-app-dnsproxy** — [luci-app-dnsproxy](https://github.com/moseszz007/luci-app-dnsproxy):
   мой UI вместо сторонней сборки, вместе с демоном `dnsproxy` и готовым конфигом
   (dnsmasq переключается на `127.0.0.1#5353`).
+- **luci-app-internet-detector** — [luci-app-internet-detector](https://github.com/moseszz007/luci-app-internet-detector):
+  форк Internet Detector: тип подключения в экземпляре задаёт иконку, статусы
+  интернета/VPN и Wi-Fi показываются на главном дашборде.
 - **luci-app-zerotier** — [luci-app-zerotier](https://github.com/moseszz007/luci-app-zerotier):
   панель ZeroTier в LuCI (VPN → ZeroTier): статус узла, сети, пиры,
   join/leave, флаги сетей и кнопка доступа к веб-интерфейсу через ZeroTier.
