@@ -108,6 +108,9 @@ KOKA_FALLBACK="2026.11.28-r41"
 ZT_REPO="$GH_USER/luci-app-zerotier"
 ZT_PKG="luci-app-zerotier"
 ZT_FALLBACK="2026.11.28-r4"
+IDET_REPO="$GH_USER/luci-app-internet-detector"
+IDET_PKG="luci-app-internet-detector"
+IDET_FALLBACK="2026.11.28-r5"
 
 # Прямая ссылка на конкретный релиз — без GitHub API, без поиска "последнего"
 release_url() {   # <repo> <pkg> <версия> <apk|ipk>
@@ -500,6 +503,8 @@ install_internet_detector() {
     /etc/init.d/rpcd restart 2>/dev/null
 
     if [ "$_fail" = "0" ]; then
+        # моя сборка LuCI-приложения (статусы на дашборде) вместо фидовой
+        install_github_pkg "$IDET_REPO" "$IDET_PKG" "$IDET_FALLBACK" >/dev/null 2>&1 || true
         ok "Internet Detector установлен"
         add_result ok "Internet Detector"
     else
