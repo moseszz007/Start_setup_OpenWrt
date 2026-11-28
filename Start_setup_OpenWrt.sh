@@ -87,7 +87,7 @@ dnsproxy-config|Только применить готовый конфиг|
 zapret|Zapret Manager: обход блокировок|
 internet-detector|Детектор интернета + русификатор|luci-app-internet-detector
 luci-theme-koka|Моя тема: скин и дашборд|luci-theme-koka
-zerotier|VPN-доступ к роутеру|zerotier
+zerotier|VPN: ZeroTier + моя панель LuCI|luci-app-zerotier
 fix-apk|Фикс установки локальных пакетов в LuCI|
 ipv6-off|Полное отключение IPv6|
 "
@@ -105,6 +105,9 @@ DNSPROXY_FALLBACK="2026.11.28-r1"
 KOKA_REPO="$GH_USER/luci-theme-koka"
 KOKA_PKG="luci-theme-koka"
 KOKA_FALLBACK="2026.11.28-r23"
+ZT_REPO="$GH_USER/luci-app-zerotier"
+ZT_PKG="luci-app-zerotier"
+ZT_FALLBACK="2026.11.28-r4"
 
 # Прямая ссылка на конкретный релиз — без GitHub API, без поиска "последнего"
 release_url() {   # <repo> <pkg> <версия> <apk|ipk>
@@ -521,78 +524,198 @@ install_koka_theme() {
     ok "Тема Koka установлена и включена — обнови страницу LuCI (F5)"
 }
 
+# ---- ZeroTier: мастер настройки ----
+# Вопрос вида "да/нет"; Enter = да
+zt_ask() {   # <вопрос>
+    printf '%b%s [Y/n]:%b ' "$C_CYN" "$1" "$C_RST"
+    read -r _a
+    case "${_a:-y}" in
+        y|Y|yes|д|Д|да) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 ask_zerotier_id() {
     [ -n "$ZEROTIER_NET_ID" ] && return 0
+
+    # если сеть уже настроена — предлагаем её же по Enter
+    _def=$(uci -q show zerotier 2>/dev/null \
+        | sed -n "s/^zerotier\.[^.]*\.id='\([0-9a-fA-F]\{16\}\)'$/\1/p" | head -n 1)
+
     echo ""
-    printf '%bВведите Network ID ZeroTier (Enter — пропустить):%b ' "$C_CYN" "$C_RST"
-    read -r ZEROTIER_NET_ID
+    if [ -n "$_def" ]; then
+        printf '%bNetwork ID ZeroTier [%s]:%b ' "$C_CYN" "$_def" "$C_RST"
+    else
+        printf '%bNetwork ID ZeroTier (16 hex, Enter — пропустить):%b ' "$C_CYN" "$C_RST"
+    fi
+    read -r _in
+    [ -z "$_in" ] && _in="$_def"
+
+    if [ -z "$_in" ]; then
+        ZEROTIER_NET_ID=""
+        return 0
+    fi
+
+    if [ ${#_in} -ne 16 ]; then
+        warn "Network ID — это ровно 16 hex-символов, пропускаю"
+        ZEROTIER_NET_ID=""
+        return 0
+    fi
+
+    case "$_in" in
+        *[!0-9a-fA-F]*) warn "Network ID может содержать только 0-9 и a-f, пропускаю"
+                        ZEROTIER_NET_ID=""; return 0 ;;
+    esac
+
+    ZEROTIER_NET_ID=$(printf '%s' "$_in" | tr 'A-F' 'a-f')
+}
+
+# Раздел global обязателен: без него init-скрипт zerotier не запускается
+zt_ensure_global() {
+    uci -q get zerotier.global >/dev/null 2>&1 || {
+        uci set zerotier.global=zerotier
+        uci set zerotier.global.enabled='0'
+    }
+}
+
+# Сеть в /etc/config/zerotier (схема zerotier >= 1.14: config network + option id)
+zt_add_network() {   # <nwid>
+    _nwid="$1"
+
+    if uci -q show zerotier 2>/dev/null | grep -q "\.id='$_nwid'"; then
+        ok "Сеть $_nwid уже в конфиге"
+        return 0
+    fi
+
+    _sid=$(uci add zerotier network)
+    if [ -z "$_sid" ]; then
+        err "Не удалось добавить сеть в /etc/config/zerotier"
+        return 1
+    fi
+
+    uci set "zerotier.$_sid.id=$_nwid"
+    uci set "zerotier.$_sid.allow_managed=1"
+    uci set "zerotier.$_sid.allow_global=0"
+    uci set "zerotier.$_sid.allow_default=0"
+    uci set "zerotier.$_sid.allow_dns=0"
+    ok "Сеть $_nwid добавлена"
+}
+
+# Доступ к LuCI через ZeroTier: в nft шаблон интерфейса — «zt*», не «zt+»
+zt_open_luci() {
+    uci set firewall.luci_zerotier=rule
+    uci set firewall.luci_zerotier.name='Allow-LuCI-ZeroTier'
+    uci set firewall.luci_zerotier.src='*'
+    uci set firewall.luci_zerotier.device='zt*'
+    uci set firewall.luci_zerotier.proto='tcp'
+    uci set firewall.luci_zerotier.dest_port='80 443'
+    uci set firewall.luci_zerotier.target='ACCEPT'
+    uci commit firewall || return 1
+    /etc/init.d/firewall reload >/dev/null 2>&1
+    return 0
+}
+
+# Ждём адрес на zt-интерфейсе: после перезапуска демона контроллер
+# выдаёт IP не мгновенно, обычно 15-25 секунд
+zt_wait_ip() {
+    _n=0
+    while [ "$_n" -lt 30 ]; do
+        _ip=$(ip -4 -o addr show 2>/dev/null \
+            | awk '$2 ~ /^zt/ { sub(/\/.*/, "", $4); print $4; exit }')
+        if [ -n "$_ip" ]; then
+            printf '%s' "$_ip"
+            return 0
+        fi
+        sleep 1
+        _n=$((_n + 1))
+    done
+    return 1
 }
 
 install_zerotier() {
     step "ZeroTier"
 
-    if ! $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier luci-i18n-zerotier-ru >/dev/null 2>&1; then
-        $INSTALL_CMD $ALLOW_UNTRUSTED zerotier luci-app-zerotier >/dev/null 2>&1 || \
-        $INSTALL_CMD $ALLOW_UNTRUSTED zerotier >/dev/null 2>&1 || true
-    fi
-
+    # 1. демон из штатного фида
+    install_pkg zerotier
     load_installed
     if ! is_installed zerotier; then
-        err "ZeroTier не установлен"
+        err "ZeroTier не установлен — проверь интернет и списки пакетов"
         add_result fail "ZeroTier"
         return 1
     fi
-    ok "Пакеты ZeroTier установлены"
 
+    # 2. моя панель LuCI из GitHub Releases (VPN → ZeroTier)
+    install_github_pkg "$ZT_REPO" "$ZT_PKG" "$ZT_FALLBACK" || \
+        warn "Панель не установилась — демон настрою и без неё"
+
+    # 3. мастер
     ask_zerotier_id
-    if [ -n "$ZEROTIER_NET_ID" ]; then
-        info "Настраиваю сеть $ZEROTIER_NET_ID"
-        uci set zerotier.openwrt_network=zerotier
-        uci set zerotier.openwrt_network.enabled='1'
-        uci -q delete zerotier.openwrt_network.join
-        uci add_list zerotier.openwrt_network.join="$ZEROTIER_NET_ID"
-        uci commit zerotier
+
+    _boot=0
+    zt_ask "Запускать ZeroTier при загрузке?" && _boot=1
+
+    _web=0
+    zt_ask "Открыть LuCI через ZeroTier (TCP 80/443 на zt*)?" && _web=1
+
+    zt_ensure_global
+    if [ "$_boot" = "1" ]; then
+        uci set zerotier.global.enabled='1'
     else
-        warn "Network ID не введён — подключение к сети пропущено"
+        uci set zerotier.global.enabled='0'
+    fi
+
+    if [ -n "$ZEROTIER_NET_ID" ]; then
+        zt_add_network "$ZEROTIER_NET_ID"
+    else
+        warn "Network ID не введён — сеть не добавляю"
+    fi
+    uci commit zerotier
+
+    # старый мастер делал netifd-интерфейс с жёстким именем ztXXXX;
+    # он ломается при смене сети, поэтому убираем, если устройства нет
+    _legacy_dev=$(uci -q get network.zerotier.device)
+    if [ -n "$_legacy_dev" ] && ! ip link show "$_legacy_dev" >/dev/null 2>&1; then
+        uci -q delete network.zerotier
+        uci commit network
+        info "Убрал устаревший интерфейс network.zerotier ($_legacy_dev)"
     fi
 
     if [ -x /etc/init.d/zerotier ]; then
-        /etc/init.d/zerotier enable 2>/dev/null
-        /etc/init.d/zerotier restart 2>/dev/null
-    fi
-
-    info "Жду появления интерфейса (3 сек)"
-    sleep 3
-
-    # ищем реальный интерфейс ztXXXXX
-    ZT_IFACE=$(ip -o link show 2>/dev/null | awk -F': ' '$2 ~ /^zt/ {print $2}' | head -n 1)
-
-    if [ -n "$ZT_IFACE" ]; then
-        info "Нашёл интерфейс $ZT_IFACE — привязываю к сети"
-        uci set network.zerotier=interface
-        uci set network.zerotier.proto='none'
-        uci set network.zerotier.device="$ZT_IFACE"
-
-        if ! uci show firewall 2>/dev/null | grep -q "name='zerotier'"; then
-            uci add firewall zone >/dev/null
-            uci set firewall.@zone[-1].name='zerotier'
-            uci set firewall.@zone[-1].input='ACCEPT'
-            uci set firewall.@zone[-1].output='ACCEPT'
-            uci set firewall.@zone[-1].forward='ACCEPT'
-            uci set firewall.@zone[-1].masq='1'
-            uci add_list firewall.@zone[-1].network='zerotier'
-            uci commit firewall
+        if [ "$_boot" = "1" ]; then
+            /etc/init.d/zerotier enable >/dev/null 2>&1
+        else
+            /etc/init.d/zerotier disable >/dev/null 2>&1
         fi
-
-        uci commit network
-        /etc/init.d/network restart >/dev/null 2>&1
-        /etc/init.d/firewall restart >/dev/null 2>&1
-        ok "ZeroTier привязан к интерфейсу $ZT_IFACE"
-    else
-        warn "Интерфейс zt* не появился — проверь интернет и перезагрузи роутер"
+        /etc/init.d/zerotier restart >/dev/null 2>&1
     fi
 
-    info "Не забудь авторизовать роутер: https://my.zerotier.com"
+    info "Жду адрес в ZeroTier (до 30 с)"
+    ZT_IP=$(zt_wait_ip)
+    if [ -n "$ZT_IP" ]; then
+        ok "ZeroTier поднялся, адрес: $ZT_IP"
+    else
+        warn "Адрес не появился за 30 с — проверь статус в панели VPN → ZeroTier"
+    fi
+
+    if [ "$_web" = "1" ]; then
+        if zt_open_luci; then
+            ok "LuCI открыт через ZeroTier (TCP 80/443 на zt*)"
+        else
+            err "Не удалось применить правило фаервола"
+        fi
+    fi
+
+    /etc/init.d/rpcd restart >/dev/null 2>&1
+    rm -rf /tmp/luci-indexcache* 2>/dev/null
+
+    if [ -n "$ZT_IP" ] && [ "$_web" = "1" ]; then
+        info "Веб-панель из ZeroTier: http://$ZT_IP/"
+    elif [ -n "$ZT_IP" ]; then
+        info "Адрес роутера в ZeroTier: $ZT_IP"
+    fi
+    info "Панель управления: LuCI → VPN → ZeroTier"
+    info "Авторизуй узел в сети: https://my.zerotier.com"
+
     add_result ok "ZeroTier"
 }
 
@@ -649,7 +772,6 @@ run_feature() {
 install_all() {
     step "Режим «Установить всё»"
 
-    ask_zerotier_id
     step "Обновляю списки пакетов ($PKG_MGR)"
     if $UPDATE_CMD >/tmp/setup-update.log 2>&1; then
         ok "Списки обновлены"

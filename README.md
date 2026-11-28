@@ -40,6 +40,9 @@ API используется только если прямая ссылка н�
 - **luci-app-dnsproxy** — [luci-app-dnsproxy](https://github.com/moseszz007/luci-app-dnsproxy):
   мой UI вместо сторонней сборки, вместе с демоном `dnsproxy` и готовым конфигом
   (dnsmasq переключается на `127.0.0.1#5353`).
+- **luci-app-zerotier** — [luci-app-zerotier](https://github.com/moseszz007/luci-app-zerotier):
+  панель ZeroTier в LuCI (VPN → ZeroTier): статус узла, сети, пиры,
+  join/leave, флаги сетей и кнопка доступа к веб-интерфейсу через ZeroTier.
 
 ## Пункты меню
 
@@ -49,6 +52,25 @@ API используется только если прямая ссылка н�
 11. Zapret Manager.
 12. Internet Detector с русификатором.
 13. Тема Koka Modern.
-14. ZeroTier.
+14. ZeroTier: демон + моя панель LuCI + мастер настройки (см. ниже).
 15. Фикс APK в LuCI (25.12).
 16. Отключение IPv6.
+
+## Мастер ZeroTier (пункт 14)
+
+Ставит демон `zerotier` из фида и `luci-app-zerotier` из GitHub Releases, затем
+спрашивает:
+
+1. **Network ID** — 16 hex-символов; если сеть уже есть в конфиге, предлагается
+   она (Enter — оставить), пустой ввод — пропустить.
+2. **Запускать при загрузке** (по умолчанию да) — выставляет
+   `zerotier.global.enabled` и `init.d/zerotier enable`.
+3. **Открыть LuCI через ZeroTier** (по умолчанию да) — создаёт правило
+   фаервола `Allow-LuCI-ZeroTier` (TCP 80/443 на интерфейсе `zt*`) и применяет
+   его, после чего печатает адрес вида `http://10.x.x.x/`.
+
+Сеть пишется в актуальной схеме `zerotier >= 1.14` (`config network` +
+`option id`), а не в устаревшую `openwrt_network/join` — именно из-за неё
+старый мастер не подключал сеть. Отдельный netifd-интерфейс больше не
+создаётся: ZeroTier поднимает `ztXXXXXXXX` сам, а адрес выдаёт контроллер
+(скрипт ждёт его до 30 секунд).
